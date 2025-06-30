@@ -1,55 +1,31 @@
-# project_template
-a template repository for future github projects
+## Vision Zero Analysis
 
+This repo holds the code for the Data Team's analysis of Vision Zero, an NYC initiative launched in 2014 that aims to reduce traffic fatalities in the city to zero. 
 
-## Basic Repo Structure Overview
+#### Datasets Used:
 
-***
+Datasets:
+- Motor Vehicle Collisions - Crashes
+- LION Dataset
+- DOT-provided: Crashes with intersection IDs (connects collision dataset to LION)
+- NYC Planimetrics Database: Roadbed
+- NYPD Criminal Court Summonses
+- US Federal Highway Administration: Miles and Daily Vehicle - Miles Traveled
+- VZV Speed Limits
+- VZV Speed Humps
+- VZV Leading Pedestrian Interval Signals
+- VZV Enhanced Crossings
+- VZV Left Turn Traffic Calming
+- VZV Neighborhood Slow Zones
+- VZV Signal Timing
+- VZV Street Improvement Projects Intersections
+- VZV Street Improvement Projects Corridor
 
-## Readme Example
+#### Model
 
+For this analysis, we employed a negative binomial regression model to account for overdispersion in the outcome data (dispersion statistic: 1.62). The model was deployed using the glmmTMB package in R, incorporating fixed effects for the interventions and control variables, along with nested random intercepts for boroughs, NTAs, and intersections to account for baseline heterogeneity across multiple spatial scales. The relationship between population density and the number of pedestrian casualties was modeled using a natural spline with 2 degrees of freedom to capture evident nonlinearity. To account for heteroskedasticity, we calculated cluster-bootstrap robust standard errors. 
 
+#### Results
 
-### Analyzing Storefront Vacancies
-Data analysis and visuals for NYCC 6.9.22 ['Oversight - Combatting Commercial Vacancies'](https://legistar.council.nyc.gov/MeetingDetail.aspx?From=Alert&ID=980028&GUID=239563C5-9CA2-44A7-8E1D-A970A0556192) hearing.
+Overall, pedestrian casualties in the city decreased during the observation period. After controlling for this downward trend, significant, negative associations with pedestrian casualties were still found for the citywide speed limit reduction (IRR 0.95, 95% CI 0.90 to 0.99), neighborhood slow zones (IRR 0.82, 95% CI 0.65 to 0.96), speed humps (IRR 0.87, 95% CI 0.78 to 0.95), SIP corridors (IRR 0.95, 95% CI 0.90 to 0.99), and turn traffic calming (IRR 0.83, 95% CI 0.72 to 0.91). A small, but significant positive association was found for 25 MPH signal retiming (IRR 1.07, 95% CI 1.02 to 1.11), representing a 6.8% increase. Enhanced crossings, leading pedestrian interval signals, and SIP intersections did not demonstrate any significant impact on pedestrian casualties. Neighborhood slow zones and turn traffic calming stand out as having the largest effects, at -17.6% and -17.2%, respectively. The majority of residual variance was at the intersection level (SD = 1.14), followed by NTA (SD = 0.51) and borough (SD = 0.27), indicating substantial variation in pedestrian injury rates across these spatial units. 
 
-An associated webpage for this analysis can be found [on the council website](https://council.nyc.gov/data/vacant-storefronts/): 
-
-***  
-
-#### Data Sources 
-- [Storefronts Reported Vacant or Not (Filing Year 2020 - 2021)](https://data.cityofnewyork.us/City-Government/Storefronts-Reported-Vacant-or-Not-Filing-Year-202/92iy-9c3n)
-
-- 2019 5-Year ACS Survey: *We used R package censusapi to get demographic data
-
-#### Methodology 
-
-##### Summary & Intention
-New York City can be a challenging place for small businesses to operate. In addition to adhering to occasionally complex regulatory schemes enforced by multiple City agencies, business owners confront hurdles including rising rents, taxation, competition from chain stores and e-commerce retailers, and various zoning restrictions. Over the course of the last year, a slew of beloved local establishments across the city closed amid skyrocketing costs.
-
-Local Law 157 of 2019 seeks to gather data about the state of vacant storefronts to conduct the sort of studies needed to understand the full scope of storefront vacancy in New York City. The bill requires the department of finance to collect data and establish a public dataset of commercial properties in the City.
-
-The data team analyzed local law 57 data in order to:
-- Assess the severity of the problem 
-- Identify vacant storefront hotspots 
-- Release recommendations for better reporting
-
-#### Main Takeaways
-Through an analysis of this data, the New York City Council Data Team has investigated hotspots of storefront vacancies and potential economic correlations:
-
-- Overall, the highest vacancy rates are found in the lower and midtown Manhattan and downtown Brooklyn business areas. These are also the areas that received that most COVID-19 grants and loans.
-- At the neighborhood level, West Brighton, Stuyvesant Town-Cooper Village, Turtle Bay-East Midtown and Brooklyn Heights-Cobble Hill have the highest vacancies. 
-- At a more granular level, census tracts with the higher vacancy rates have, on average, 216 storefronts per census tract and are mostly located in lower Manhattan.
-- While the vacancy rate hovers around 12% for most census tracts, those with lower income residents are more likely to have very high vacancy rates (above 20% vacancy).
-- Improving current reporting of Local Law 157 of 2019 is important to fully understand the issue. Recommendations are provided below.
-
-#### Recommendations
-Certain changes could be made by the Department of Finance to improve the overall usability of the data set. Those changes include:
-
-- Adding a column for the date and specifically the year of the data collected
-- Streamlining the multiple datasets for each year into one dataset to allow for easy integration in live updating tools/maps/charts and more accessibility to citizen data scientists
-- Reduce geocode null values
-- Require class 1 properties to update their status as of 6/30 or date sold if earlier than 6/30
-- Require owners to report the primary business activity of the last business that leased the storefront
-
-#### Scripts
