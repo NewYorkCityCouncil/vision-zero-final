@@ -1,0 +1,20 @@
+
+```{r}
+library(tidyverse)
+library(sf)
+```
+
+```{r}
+# downloaded from: https://www.nyc.gov/content/planning/pages/resources/datasets/lion
+lions <- st_read("../data/input/lion/lion.gdb/", "lion") 
+# create single geometry
+gdalUtilities::ogr2ogr("../data/input/lion/lion.gdb/lion", '../data/output/lion_geojson', explodecollections = T, nlt = 'CONVERT_TO_LINEAR')
+
+# st_write(lions, "../data/output/lion_shp/lion.geojson", driver = )
+
+```
+```{r}
+st_write(lions, dsn = "../data/output/lion_geojson/lion.geojson", layer = "lion.geojson")
+```
+
+

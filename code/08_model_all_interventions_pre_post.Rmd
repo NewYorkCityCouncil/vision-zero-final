@@ -1,0 +1,1268 @@
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(glmmTMB)
+library(DHARMa)
+library(effects)
+library(performance)
+library(purrr)
+library(furrr)
+library(splines)
+library(future.apply)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(plotly) 
+library(ggeffects)
+```
+
+# Uploading and Preparing the Data
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+# Picking a Model Type
+
+```{r}
+# fit a Poisson regression model 
+# pedestrians
+
+poisson_model <- glm(
+  pedestrian_death_or_injury ~ 
+    leading_pedestrian_interval_post + 
+    turn_traffic_calming_post + 
+    enhanced_crossing_post + 
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 +
+    scaled_summonses + 
+    scaled_traffic_volume +
+    scaled_pop_density +
+    scaled_time +
+    (1 | intersection_id),
+  family = "poisson", 
+  data = sites_ever_treated 
+)
+
+# calculate dispersion statistic
+# dispersion stat over 1.5 indicates needs for negative binomial
+dispersion_stat <- sum(residuals(poisson_model, type = "pearson")^2) / poisson_model$df.residual
+print(paste("Dispersion statistic:", dispersion_stat))
+```
+
+## First Model Attempt
+
+```{r}
+# pedestrians
+# negative binomial regression (dispersion stat: 1.62)
+# sites ever treated from 2015 through 2021
+# looking at data from 2013 through 2023
+
+model_orig <- glmmTMB(
+  pedestrian_death_or_injury ~
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 +
+    scaled_summonses +
+    scaled_traffic_volume + 
+    scaled_pop_density +
+    scaled_time +
+    (1 | intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+)
+
+summary(model_orig)
+```
+
+```{r}
+# diagnostics
+
+# tests find zero-inflation, underdispersion, non-normal residuals, and outliers
+
+sim_res_orig <- simulateResiduals(fittedModel = model_orig, n = 500, plot = TRUE)
+testZeroInflation(sim_res_orig) # zero-inflation test
+testDispersion(sim_res_orig) # dispersion test
+testUniformity(sim_res_orig) # KS test
+testOutliers(sim_res_orig) # outliers
+```
+
+# Fine-Tuning the Model
+
+Will consider:
+- Nested Random Effect
+- Splines
+- Dispersion Formula
+
+## Nested Random Effect
+
+A nested random effect for intersection/ NTA/ borough allows the baseline to vary by intersection, NTA, and borough.
+
+It captures:
+- Variation between regions (e.g. two boroughs), and
+- Additional variation between sub-regions within the same larger region (e.g. two intersections within the same NTA).
+
+This structure accounts for more granular clustering, recognizing that, for example: 
+- Observations from the same intersection are more similar to each other than to other intersections in the same NTA.
+- NTAs differ from one another, but there's also important within-NTA variation at the intersection level.
+- Same applies to boroughs and NTAs, etc
+
+```{r}
+# experimenting with random effects 
+
+# NTA and intersection nested 
+model_nta_RE <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    scaled_pop_density +        
+    scaled_time +       
+    (1 | ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+# borough, NTA, and intersection nested 
+model_boro_RE <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    scaled_pop_density +
+    scaled_time +       
+    (1|boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+anova(model_orig, model_nta_RE, model_boro_RE)
+```
+
+### model_boro_RE has best AIC and fixes zero-inflation and dispersion
+### KS test (non-normal residuals) and outliers remain a problem for both models
+
+```{r}
+# diagnostics
+
+sim_res_nta_RE <- simulateResiduals(fittedModel = model_nta_RE, n = 500, plot = TRUE)
+testZeroInflation(sim_res_nta_RE) # zero-inflation test
+testDispersion(sim_res_nta_RE) # dispersion test
+testUniformity(sim_res_nta_RE) # KS test
+testOutliers(sim_res_nta_RE) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_nta_RE), residuals(model_nta_RE, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+```{r}
+# model 2
+sim_res_boro_RE <- simulateResiduals(fittedModel = model_boro_RE, n = 500, plot = TRUE)
+testZeroInflation(sim_res_boro_RE) # zero-inflation test
+testDispersion(sim_res_boro_RE) # dispersion test
+testUniformity(sim_res_boro_RE) # KS test
+testOutliers(sim_res_boro_RE) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_boro_RE), residuals(model_boro_RE, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+## Splines
+
+Splines allow for more flexible modeling of non-linear patterns in continuous control variables
+
+```{r}
+# check for non-linear patterns in continuous controls
+# scaled_pop_density looks the least linear
+
+ggplot(intervention_df, aes(x = scaled_summonses, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Traffic Summonses",
+    x = "Scaled Traffic Summonses",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+
+ggplot(intervention_df, aes(x = scaled_traffic_volume, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Traffic Volume",
+    x = "Scaled Traffic Volume",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+
+ggplot(intervention_df, aes(x = scaled_pop_density, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Population Density",
+    x = "Scaled Population Density",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+
+ggplot(intervention_df, aes(x = scaled_time, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Time",
+    x = "Scaled Time",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+
+```{r}
+# updating model with spline
+
+# one spline for scaled_pop_density
+model_spline <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+anova(model_boro_RE, model_spline)
+```
+
+```{r}
+# compare to scatter plots/ use judgement when thinking about whether or not the splines capture the trend
+
+# plotting the relationship captured by each model
+plot(Effect("scaled_pop_density", model_orig))
+plot(Effect("scaled_pop_density", model_spline))
+```
+
+```{r}
+# after introducing new terms, is there multicollinearity?
+
+# no issues
+
+check_collinearity(model_spline)
+```
+
+### model_spline has improved AIC and unchanged diagnostics, so will choose it
+
+```{r}
+# diagnostics
+
+sim_res_spline <- simulateResiduals(fittedModel = model_spline, n = 500, plot = TRUE)
+testZeroInflation(sim_res_spline) # zero-inflation test
+testDispersion(sim_res_spline) # dispersion test
+testUniformity(sim_res_spline) # KS test
+testOutliers(sim_res_spline) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_spline), residuals(model_spline, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+# Dispersion Formula (dispformula)
+
+Conditional model:
+- The mean (expected outcome): How predictors influence the average pedestrian casualties per unit
+
+Dispersion model:	
+- The variance (spread of outcome): How predictors influence the dispersion — i.e., whether the variance is larger or smaller for certain values
+
+Without dispformula, the model assumes the same dispersion level across all observations. By adding dispformula, it explicitly models heteroskedasticity — i.e., allowing areas or time periods to have more or less stable outcomes.
+
+This can lead to better residuals, more accurate standard errors, and more trustworthy p-values.
+
+```{r}
+# timing for how long one simulation will take 
+
+timing <- system.time({
+  
+mod <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  dispformula = ~1,
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+  
+sim_res <- simulateResiduals(mod)
+dharma_disp <- testDispersion(sim_res, plot = FALSE)
+dispersion_numeric <- as.numeric(dharma_disp$statistic)
+    
+})
+
+print(timing)
+```
+
+```{r}
+# using a simulation to find best dispersion formula for the NB model
+# considering AIC, BIC, and KS test (normality of residuals, which is still failing the DHARMa test)
+
+# seconds to complete a model test (estimate based on running one test)
+secs_to_complete_one = timing["elapsed"]
+
+# number of cores working at once
+num_workers = 5
+plan(multisession, workers = num_workers)
+
+# formula to test with
+fixed_formula <- pedestrian_death_or_injury ~ 
+  turn_traffic_calming_post +
+  leading_pedestrian_interval_post +
+  enhanced_crossing_post +
+  speed_humps_post +
+  street_improvement_project_post +
+  street_improvement_corridors_post +
+  signal_retiming_post +
+  slow_zones_post +
+  speed_limit_post +
+  covid_2020 + 
+  scaled_traffic_volume + 
+  splines::ns(scaled_pop_density, df = 2) +
+  scaled_time +
+  (1 | boro_name/ntaname/intersection_id)
+
+# list of possible variables for dispformula (just doing controls)
+disp_vars <- c(
+  "scaled_time",
+  "scaled_pop_density",
+  "scaled_traffic_volume",
+  "scaled_summonses",
+  "covid_2020",
+  "speed_limit_post"
+  # "slow_zones_post",
+  # "signal_retiming_post",
+  # "street_improvement_corridors_post",
+  # "street_improvement_project_post",
+  # "speed_humps_post",
+  # "enhanced_crossing_post",
+  # "leading_pedestrian_interval_post",
+  # "turn_traffic_calming_post"
+)
+
+# set number of variables in dispformula 
+max_terms <- 5
+# calculate number of possible combinations
+disp_combinations <- unlist(
+  lapply(0:min(max_terms, length(disp_vars)), function(i) combn(disp_vars, i, simplify = FALSE)),
+  recursive = FALSE
+)
+
+cat("Number of dispersion combinations:", length(disp_combinations), "\n")
+cat("Estimated completion time:", length(disp_combinations) * secs_to_complete_one /  num_workers / 60 / 60, "hours\n")
+
+# run model with one dispformula combo and collect stats
+fit_model_safe <- function(disp_vars_subset) {
+  disp_formula_str <- if (length(disp_vars_subset) == 0) {
+    "~ 1"
+  } else {
+    paste0("~ ", paste(disp_vars_subset, collapse = " + "))
+  }
+
+  disp_formula <- as.formula(disp_formula_str)
+
+  tryCatch({
+    mod <- glmmTMB(
+      formula = fixed_formula,
+      dispformula = disp_formula,
+      family = nbinom1,
+      data = sites_ever_treated
+    )
+    
+    # DHARMa KS test for uniformity
+    simulation_output <- simulateResiduals(fittedModel = mod)
+    dharma_ks <- tryCatch({
+      testUniformity(simulation_output, plot = FALSE)
+    }, error = function(e) {
+      list(statistic = NA, p.value = NA)
+    })
+
+    # extracting statistic
+    ks_numeric <- as.numeric(dharma_ks$statistic)
+     
+    # collecting values for AIC, BIC, and KS stat   
+    list(
+      dispformula = disp_formula_str,
+      AIC = AIC(mod),
+      BIC = BIC(mod),
+      dharma_ks_stat = ks_numeric,
+      dharma_ks_p = dharma_ks$p.value,
+      error = NA
+    ) 
+  }, error = function(e) { # noting any errors 
+    list(
+      dispformula = disp_formula_str,
+      AIC = NA,
+      BIC = NA,
+      dharma_ks_stat = NA,
+      dharma_ks_p = NA,
+      error = e$message
+    )
+  })
+}
+
+# run in parallel with future_map
+results_disp <- future_map(
+  disp_combinations,
+  fit_model_safe,
+  .progress = TRUE,
+  .options = furrr_options(seed = TRUE)
+)
+
+# convert to dataframe
+results_df_disp <- bind_rows(results_disp)
+results_df_disp %>% count(error, sort = TRUE)
+
+# show best model for AIC
+best_model_row_AIC <- results_df_disp %>% filter(!is.na(AIC)) %>% slice_min(AIC, n = 1)
+print(best_model_row_AIC)
+
+# show best model for BIC
+best_model_row_BIC <- results_df_disp %>% filter(!is.na(BIC)) %>% slice_min(BIC, n = 1)
+print(best_model_row_BIC)
+
+# show best model for KS (highest p-val)
+best_model_row_KS <- results_df_disp %>% filter(!is.na(dharma_ks_p)) %>% slice_max(dharma_ks_p, n = 1)
+print(best_model_row_KS)
+
+# show best combination of AIC, BIC, and KS (by combining their ranks)
+# lowest combined score is the best
+results_df_disp <- results_df_disp %>%
+  filter(!is.na(AIC), !is.na(BIC), !is.na(dharma_ks_p)) %>%
+  mutate(
+    aic_rank = rank(AIC),
+    bic_rank = rank(BIC),
+    ks_score = 1 - dharma_ks_p, # higher p-val is better
+    combined_rank = aic_rank + bic_rank + ks_score
+    # optionally apply weights, e.g., combined_rank = aic_rank + bic_rank + 10 * ks_score
+  ) %>%
+  arrange(combined_rank)
+
+# view the top models
+head(results_df_disp, 5)
+
+```
+
+```{r}
+# best overall ~ speed_limit_post
+# best for KS test ~ scaled_summonses + speed_limit_post
+
+# testing both
+
+model_dispformula1 <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +       
+    (1 | boro_name/ntaname/intersection_id),
+  dispformula = ~ speed_limit_post,
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+model_dispformula2 <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +       
+    (1 | boro_name/ntaname/intersection_id),
+  dispformula = ~ scaled_summonses + speed_limit_post,
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+anova(model_spline, model_dispformula1, model_dispformula2)
+```
+
+### model_dispformula1 has slightly better AIC but no improvement on diagnostics, so will stick with previous model
+
+```{r}
+# diagnostics
+
+sim_res_dispformula1 <- simulateResiduals(fittedModel = model_dispformula1, n = 500, plot = TRUE)
+testZeroInflation(sim_res_dispformula1) # zero-inflation test
+testDispersion(sim_res_dispformula1) # dispersion test
+testUniformity(sim_res_dispformula1) # KS test
+testOutliers(sim_res_dispformula1) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_dispformula1), residuals(model_dispformula1, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+```{r}
+# model 2
+sim_res_dispformula2 <- simulateResiduals(fittedModel = model_dispformula2, n = 500, plot = TRUE)
+testZeroInflation(sim_res_dispformula2) # zero-inflation test
+testDispersion(sim_res_dispformula2) # dispersion test
+testUniformity(sim_res_dispformula2) # KS test
+testOutliers(sim_res_dispformula2) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_dispformula2), residuals(model_dispformula2, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+# Exploring the Chosen Model
+
+```{r}
+# looking at final diagnostic plots for model (greater number of simulations, plus in-depth outlier check)
+
+sim_res <- simulateResiduals(fittedModel = model_spline, n = 1000, plot = TRUE)
+testZeroInflation(sim_res) # zero-inflation test
+testDispersion(sim_res) # dispersion test
+testUniformity(sim_res) # KS test
+# DHARMa:testOutliers with type = binomial may have inflated Type I error rates for integer-valued distributions. To get a more exact result, it is recommended to re-run testOutliers with type = 'bootstrap'. See ?testOutliers for details
+testOutliers(sim_res, type = "bootstrap") # outlier test
+```
+
+```{r}
+# visualizing results
+
+# extract fixed effect estimates and standard errors 
+coef_point_estimates <- fixef(model_spline)$cond
+model_vcov <- vcov(model_spline)$cond
+model_se <- sqrt(diag(model_vcov))
+
+# compute z-scores and two-tailed p-values
+z_scores <- coef_point_estimates / model_se
+p_values_model <- 2 * (1 - pnorm(abs(z_scores)))
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  "scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", # can't be interpreted in the same way as the other coefficients
+  # "ns(scaled_pop_density, df = 2)2",
+  "scaled_traffic_volume",
+  "scaled_summonses",
+  "covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# add significance indicator
+percent_change_df <- percent_change_df %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant")
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% Bootstrap CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Point estimates from model_dispformula; cluster-robust bootstrap SEs and CIs",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+
+```
+
+```{r}
+# example marginal (isolated) effects of interventions
+
+# turn traffic calming
+p1 <- ggpredict(model_spline, terms = "turn_traffic_calming_post [all]") %>%
+  plot() + 
+  ggtitle("Effect of Turn Traffic Calming")
+
+p1
+
+# speed humps
+p2 <- ggpredict(model_spline, terms = "speed_humps_post [all]") %>%
+  plot() + 
+  ggtitle("Effect of Speed Humps")
+
+p2
+
+# signal retiming
+p3 <- ggpredict(model_spline, terms = "signal_retiming_post [all]") %>%
+  plot() + 
+  ggtitle("Effect of Signal Retiming")
+
+p3
+```
+
+# Addressing hetereoskedasticity
+
+## Cluster Bootstrap Robust Standard Errors
+
+Cluster bootstrap procedure for generating robust standard errors for a glmmTMB model - can use bootstrapping to make the SE's more robust to heteroskedasticity 
+
+What Bootstrapping Affects:
+
+Point Estimates (Coefficients):
+
+The point estimates (coefficients) remain the same as in the original model fit
+
+Standard Errors:
+
+Bootstrapping primarily changes the standard errors
+Rather than relying on model-based SEs (from vcov()), uses empirically derived SEs from resampling
+These bootstrap SEs account for clustering and are generally more robust
+
+Confidence Intervals:
+
+Bootstrap CIs can be asymmetric (unlike model-based CIs which are typically symmetric)
+They're built directly from the empirical distribution of bootstrap estimates
+They don't assume normality in the sampling distribution
+
+P-values:
+
+Bootstrap p-values are derived from the empirical distribution rather than parametric assumptions
+They're more robust to violations of model assumptions
+
+Why robust standard errors help:
+
+- They provide valid inference even when residual variance isn't constant
+- They don't require correctly specified variance structure
+- They're "robust" to violations of homoscedasticity assumptions
+
+```{r}
+# cluster bootstrap robust standard errors (takes 8.5 hours to run with R = 1000)
+
+cluster_bootstrap_glmmTMB <- function(model, data, cluster_var, R = 500, secs_per_iter = NULL) {
+  
+  if (!is.null(secs_per_iter)) {
+    total_hours <- secs_per_iter * R / 3600
+    cat("Estimated total time:", round(total_hours, 2), "hours\n")
+  }
+  
+  clusters <- unique(data[[cluster_var]])
+  n_clusters <- length(clusters)
+
+  coefs_cond <- matrix(NA, nrow = R, ncol = length(fixef(model)$cond))
+  colnames(coefs_cond) <- names(fixef(model)$cond)
+
+  # comment out dispersion-related matrices (unless using dispformula)
+  # coefs_disp <- if (!is.null(fixef(model)$disp)) {
+  #   matrix(NA, nrow = R, ncol = length(fixef(model)$disp))
+  # } else NULL
+  #
+  # if (!is.null(coefs_disp)) colnames(coefs_disp) <- names(fixef(model)$disp)
+
+  residuals_list <- vector("list", R)
+  fitted_list <- vector("list", R)
+
+  for(i in 1:R) {
+    if(i %% 50 == 0) cat("Bootstrap iteration:", i, "\n")
+
+    sampled_clusters <- sample(clusters, n_clusters, replace = TRUE)
+    boot_data <- do.call(rbind, lapply(sampled_clusters, function(cl) data[data[[cluster_var]] == cl, ]))
+
+    boot_model <- tryCatch(update(model, data = boot_data), error = function(e) NULL)
+
+    if (!is.null(boot_model)) {
+      coefs_cond[i, ] <- fixef(boot_model)$cond
+      
+      # comment out dispersion-related storage (unless using dispformula)
+      # if (!is.null(coefs_disp) && !is.null(fixef(boot_model)$disp)) {
+      #   coefs_disp[i, ] <- fixef(boot_model)$disp
+      # }
+
+      residuals_list[[i]] <- residuals(boot_model)
+      fitted_list[[i]] <- fitted(boot_model)
+    }
+  }
+
+  bootstrap_se_cond <- apply(coefs_cond, 2, sd, na.rm = TRUE)
+  ci_lower_cond <- apply(coefs_cond, 2, function(x) quantile(x, 0.025, na.rm = TRUE))
+  ci_upper_cond <- apply(coefs_cond, 2, function(x) quantile(x, 0.975, na.rm = TRUE))
+
+  estimates_cond <- fixef(model)$cond
+  p_values_cond <- sapply(1:length(estimates_cond), function(j) {
+    opposite_sign <- mean(coefs_cond[, j] * estimates_cond[j] < 0, na.rm = TRUE)
+    min(1, opposite_sign * 2)
+  })
+
+  # comment out dispersion-related inference (unless using dispformula)
+  # bootstrap_se_disp <- ci_lower_disp <- ci_upper_disp <- p_values_disp <- NULL
+
+  convergence_rate_cond <- 1 - (sum(apply(coefs_cond, 1, function(x) any(is.na(x)))) / R)
+
+  return(list(
+    coefs_cond = coefs_cond,
+    bootstrap_se_cond = bootstrap_se_cond,
+    ci_lower_cond = ci_lower_cond,
+    ci_upper_cond = ci_upper_cond,
+    p_values_cond = p_values_cond,
+    # coefs_disp = coefs_disp,
+    # bootstrap_se_disp = bootstrap_se_disp,
+    # ci_lower_disp = ci_lower_disp,
+    # ci_upper_disp = ci_upper_disp,
+    # p_values_disp = p_values_disp,
+    convergence_rate = convergence_rate_cond,
+    total_iterations = R,
+    residuals = residuals_list,
+    fitted = fitted_list
+  ))
+}
+
+start_time <- Sys.time()
+
+# run 1 bootstrap iteration for time estimate
+cluster_bootstrap_glmmTMB(model = model_spline, data = sites_ever_treated, cluster_var = "intersection_id", R = 1)
+
+end_time <- Sys.time()
+secs_per_iter <- as.numeric(difftime(end_time, start_time, units = "secs"))
+
+boot_results <- cluster_bootstrap_glmmTMB(
+    model = model_spline,
+    data = sites_ever_treated,
+    cluster_var = "intersection_id",
+    R = 1000,  # 1000 reasonable final number for complex model, increase if needed
+    secs_per_iter = secs_per_iter
+  )
+
+```
+
+```{r}
+# proportion of bootstrap iterations that successfully converged
+boot_results$convergence_rate
+```
+
+```{r}
+# create comparison tools that show the difference between original model SEs and bootstrap SEs
+
+# === 1. Extract Original Model Information ===
+model_summary <- summary(model_splines1)
+original_coefs <- fixef(model_splines1)$cond
+original_se <- sqrt(diag(vcov(model_splines1)$cond))
+original_z <- original_coefs / original_se
+original_p <- 2 * pnorm(abs(original_z), lower.tail = FALSE)
+
+# === 2. Extract Bootstrap Results ===
+bootstrap_se <- boot_results$bootstrap_se_cond
+bootstrap_ci_lower <- boot_results$ci_lower_cond
+bootstrap_ci_upper <- boot_results$ci_upper_cond
+bootstrap_p <- boot_results$p_values_cond
+bootstrap_coefs <- colMeans(boot_results$coefs_cond, na.rm = TRUE)
+
+# === 3. Create Comparison Table ===
+comparison_df <- data.frame(
+  term = names(original_coefs),
+  original_estimate = original_coefs,
+  original_se = original_se,
+  original_p = original_p,
+  bootstrap_estimate = bootstrap_coefs,
+  bootstrap_se = bootstrap_se,
+  bootstrap_p = bootstrap_p,
+  se_ratio = bootstrap_se / original_se,
+  p_value_diff = bootstrap_p - original_p
+)
+
+# Format and add significance flags
+comparison_table <- comparison_df %>%
+  mutate(
+    across(where(is.numeric), round, 4),
+    original_sig = ifelse(original_p < 0.05, "*", ""),
+    bootstrap_sig = ifelse(bootstrap_p < 0.05, "*", ""),
+    significance_change = original_sig != bootstrap_sig
+  ) %>%
+  arrange(desc(abs(se_ratio - 1)))  # Largest change in SEs
+
+# === Print Table ===
+print("Comparison of Original vs. Bootstrap Standard Errors:")
+print(comparison_table)
+
+# === 4. Coefficient Plots ===
+
+# Define a fixed term order based on original estimates (or any consistent logic)
+
+custom_order <- c(  
+  "scaled_time",
+  #"scaled_pop_density",
+  "scaled_traffic_volume",
+  "scaled_summonses",
+  "covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+  )  
+
+coef_plot_data <- comparison_df %>%
+  mutate(
+    original_lower = original_estimate - 1.96 * original_se,
+    original_upper = original_estimate + 1.96 * original_se,
+    bootstrap_lower = bootstrap_estimate - 1.96 * bootstrap_se,
+    bootstrap_upper = bootstrap_estimate + 1.96 * bootstrap_se,
+    original_sig = ifelse(original_p < 0.05, "Significant", "Not Significant"),
+    bootstrap_sig = ifelse(bootstrap_p < 0.05, "Significant", "Not Significant")
+  )
+
+coef_plot_data <- coef_plot_data %>%
+  mutate(term = factor(term, levels = custom_order))
+
+p1 <- ggplot(coef_plot_data, aes(x = term, y = original_estimate)) +
+  geom_point(aes(color = original_sig), size = 3) +
+  geom_errorbar(aes(ymin = original_lower, ymax = original_upper, color = original_sig), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  scale_color_manual(values = c("Significant" = "blue", "Not Significant" = "red")) +
+  labs(title = "Original Model Coefficients",
+       subtitle = "With model-based standard errors",
+       x = NULL, y = "Estimate") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+p2 <- ggplot(coef_plot_data, aes(x = term, y = bootstrap_estimate)) +
+  geom_point(aes(color = bootstrap_sig), size = 3) +
+  geom_errorbar(aes(ymin = bootstrap_lower, ymax = bootstrap_upper, color = bootstrap_sig), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  scale_color_manual(values = c("Significant" = "blue", "Not Significant" = "red")) +
+  labs(title = "Bootstrap-Adjusted Coefficients",
+       subtitle = "With cluster-robust bootstrap SEs",
+       x = NULL, y = "Estimate") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+
+# === 5. Standard Error Comparison Plot ===
+se_comparison <- comparison_df %>%
+  select(term, original_se, bootstrap_se) %>%
+  pivot_longer(cols = -term, names_to = "se_type", values_to = "se") %>%
+  mutate(se_type = recode(se_type,
+                          original_se = "Model-based SE",
+                          bootstrap_se = "Bootstrap SE")) %>%
+  filter(term != "(Intercept)")
+
+p3 <- ggplot(se_comparison, aes(x = reorder(term, se), y = se, fill = se_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  labs(title = "Standard Error Comparison",
+       subtitle = "Model-based vs. Bootstrap SEs",
+       x = NULL, y = "Standard Error") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+print(p3)
+
+# === 6. P-Value Comparison Plot ===
+p_comparison <- comparison_df %>%
+  select(term, original_p, bootstrap_p) %>%
+  pivot_longer(cols = -term, names_to = "p_type", values_to = "p_value") %>%
+  mutate(p_type = recode(p_type,
+                         original_p = "Model-based p-value",
+                         bootstrap_p = "Bootstrap p-value")) %>%
+  filter(term != "(Intercept)")
+
+p4 <- ggplot(p_comparison, aes(x = reorder(term, p_value), y = p_value, fill = p_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(title = "P-Value Comparison",
+       subtitle = "Model-based vs. Bootstrap p-values",
+       x = NULL, y = "p-value") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+print(p4)
+
+# === 7. Highlight Terms with Significance Change ===
+sig_changes <- comparison_table %>%
+  filter(significance_change) %>%
+  select(term, original_p, bootstrap_p, se_ratio) %>%
+  arrange(desc(abs(se_ratio - 1)))
+
+print("Terms with a Change in Significance After Bootstrapping:")
+print(sig_changes)
+
+```
+
+```{r}
+# visualizing with original model's point estimates and bootstrap SEs
+
+# coefficients from original model
+coef_point_estimates <- fixef(model_splines1)$cond
+# remove intercept from all vectors
+coef_point_estimates <- coef_point_estimates[names(coef_point_estimates) != "(Intercept)"]
+# SE and p val from bootstrap model
+bootstrap_se <- bootstrap_se[names(bootstrap_se) != "(Intercept)"]
+p_values_from_boot_se <- p_values_from_boot_se[names(p_values_from_boot_se) != "(Intercept)"]
+
+# compute z-scores
+z_scores <- coef_point_estimates / bootstrap_se
+
+# compute two-tailed p-values
+p_values_from_boot_se <- 2 * (1 - pnorm(abs(z_scores)))
+
+# compute confidence intervals
+bootstrap_ci_lower <- coef_point_estimates - 1.96 * bootstrap_se
+bootstrap_ci_upper <- coef_point_estimates + 1.96 * bootstrap_se
+
+# build percent change dataframe
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(bootstrap_ci_lower) - 1),
+  upper_ci = 100 * (exp(bootstrap_ci_upper) - 1),
+  p_value = p_values_from_boot_se
+) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# add significance indicator
+percent_change_df <- percent_change_df %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant")
+  )
+
+# define custom order
+custom_order <- c(
+  "scaled_time",
+  #"scaled_pop_density",
+  "scaled_traffic_volume",
+  "scaled_summonses",
+  "covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% Bootstrap CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries (with Bootstrap CIs)",
+    subtitle = "Point estimates from model_dispformula; cluster-robust bootstrap SEs and CIs",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# Show the plot
+p
+
+```
+
+# Estimating Casualties Prevented
+
+```{r}
+# estimating casualties prevented due to interventions implemented in ALL treated intersections between 2013-2023 (not just those selected as sites for the model) using coefficients from the model
+
+# creating a counterfactual dataset where the interventions are turned off
+all_sites <- read_csv('../data/output/intersection_intervention_table_final.csv')
+all_sites <- all_sites %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+df_cf <- all_sites
+df_cf$turn_traffic_calming_post <- 0  
+df_cf$leading_pedestrian_interval_post <- 0
+df_cf$enhanced_crossing_post <- 0
+df_cf$speed_humps_post <- 0
+df_cf$signal_retiming_post <- 0
+df_cf$street_improvement_project_post <- 0
+df_cf$street_improvement_corridor_post <- 0
+df_cf$slow_zones_post <- 0
+df_cf$speed_limit_post <- 0
+
+# predicting expected fatalities *without* intervention
+all_sites$predicted_no_intervention <- predict(model_spline, newdata = df_cf, type = "response")
+# predicting expected fatalities *with* intervention (this is the actual fit)
+all_sites$predicted_with_intervention <- predict(model_spline, newdata = all_sites, type = "response")
+
+# difference
+all_sites$casualties_prevented <- all_sites$predicted_no_intervention - all_sites$predicted_with_intervention
+
+# casualties prevented considering all interventions
+total_casualties_prevented_all <- sum(all_sites$casualties_prevented[all_sites$turn_traffic_calming_post == 1]) + 
+  sum(all_sites$casualties_prevented[all_sites$leading_pedestrian_interval_post == 1]) + sum(all_sites$casualties_prevented[all_sites$enhanced_crossing_post == 1]) + sum(all_sites$casualties_prevented[all_sites$speed_humps_post == 1]) + sum(all_sites$casualties_prevented[all_sites$signal_retiming_post == 1]) + sum(all_sites$casualties_prevented[all_sites$street_improvement_project_post == 1], na.rm = TRUE) + sum(all_sites$casualties_prevented[all_sites$street_improvement_corridors_post == 1]) + sum(all_sites$casualties_prevented[all_sites$slow_zones_post == 1])
+sum(all_sites$casualties_prevented[all_sites$speed_limit_post == 1])
+
+# casualties prevented considering only significant interventions
+total_casualties_prevented_sig <- sum(all_sites$casualties_prevented[all_sites$turn_traffic_calming_post == 1]) + 
+  sum(all_sites$casualties_prevented[all_sites$speed_humps_post == 1]) + sum(all_sites$casualties_prevented[all_sites$signal_retiming_post == 1]) + sum(all_sites$casualties_prevented[all_sites$street_improvement_corridors_post == 1]) + sum(all_sites$casualties_prevented[all_sites$slow_zones_post == 1]) 
+sum(all_sites$casualties_prevented[all_sites$speed_limit_post == 1])
+
+print(total_casualties_prevented_all)
+print(total_casualties_prevented_sig)
+```
+
+```{r}
+# theoretical casualties prevented
+
+# denominator is collisions in all citywide intersections, not just those treated with VZ
+open_data_veh_collisions <- read_csv('../data/output/open-data_vehicle-collision-dataset.csv')
+citywide_pedestrian_casualties <- open_data_veh_collisions %>%
+  mutate(pedestrian_death_or_injury = number_of_pedestrians_injured + number_of_pedestrians_killed) %>%
+  mutate(crash_year = year(crash_date)) %>%
+  filter(crash_year >= 2013 & crash_year <= 2023) %>%
+  summarise(total = sum(pedestrian_death_or_injury, na.rm = TRUE)) %>%
+  pull(total)
+
+# denominator is all intersections treated with VZ
+vz_treated_pedestrian_casualties <- all_sites %>%
+  filter(year >= 2013 & year <= 2023) %>%
+  summarise(total = sum(pedestrian_death_or_injury, na.rm = TRUE)) %>%
+  pull(total)
+
+# reduced citywide casualties by: 
+# only significant interventions
+100*(total_casualties_prevented_sig / (citywide_pedestrian_casualties + total_casualties_prevented_sig))
+# all interventions
+100*(total_casualties_prevented_all / (citywide_pedestrian_casualties + total_casualties_prevented_all))
+
+# reduced casualties in treated intersections by: 
+# only significant interventions
+100*(total_casualties_prevented_sig / (vz_treated_pedestrian_casualties + total_casualties_prevented_sig))
+# all interventions
+100*(total_casualties_prevented_all / (vz_treated_pedestrian_casualties + total_casualties_prevented_all))
+```
