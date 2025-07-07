@@ -308,8 +308,28 @@ model_spline <- glmmTMB(
   family = nbinom1,
   data = sites_ever_treated
 ) 
-
 anova(model_boro_RE, model_spline)
+
+summary(model_spline)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Get the confidence intervals for the log-coefficients
+ci_log <- confint(model_spline, parm = "beta_", method = "wald") # Wald is fastest
+
+# Get the coefficients table from the summary
+summary_table <- summary(model_spline)$coefficients$cond
+
+# Combine the log-estimates and log-CIs
+log_results <- cbind(summary_table, ci_log)
+
+# Exponentiate everything to get IRRs and their CIs
+irr_results <- exp(log_results)
+
+# Print the final table
+print(irr_results)
 ```
 
 ```{r}
