@@ -13,11 +13,10 @@ from geopandas import GeoDataFrame
 from shapely.geometry import Point
 from shapely.geometry import MultiLineString, LineString
 
-# In[ ]:
+# In[469]:
 
 
 # uploading tables with collision data for every intersection per year
-# this is a test commit
 
 intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_initial.csv')
 
