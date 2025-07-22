@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[151]:
+# In[1]:
 
 
 import pandas as pd
@@ -14,14 +14,14 @@ from shapely import wkt
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.tools.tools import add_constant
 
-# In[152]:
+# In[2]:
 
 
 # upload
 
 intersection_intervention_ever_treated = pd.read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv')
 
-# In[153]:
+# In[3]:
 
 
 # pedestrian casualties in citywide intersections (background trend)
@@ -31,14 +31,14 @@ open_data_veh_collisions['crash_date'] = pd.to_datetime(open_data_veh_collisions
 open_data_veh_collisions['pedestrian_death_or_injury'] = open_data_veh_collisions['number_of_pedestrians_killed'] + open_data_veh_collisions['number_of_pedestrians_injured']
 open_data_veh_collisions[['pedestrian_death_or_injury']].groupby(open_data_veh_collisions['crash_date'].dt.year).sum().loc[2013:2024].plot()
 
-# In[ ]:
+# In[4]:
 
 
 # pedestrian casualties in treated intersections
 
 intersection_intervention_ever_treated[['year','pedestrian_death_or_injury']].groupby('year').sum().loc[2013:2024].plot()
 
-# In[ ]:
+# In[5]:
 
 
 # find when each intervention was first introduced to each intersection
@@ -67,49 +67,49 @@ totals.index = ["Total"]
 intersection_intervention_count_table  = pd.concat([intersection_intervention_count_table, totals])
 intersection_intervention_count_table
 
-# In[ ]:
+# In[6]:
 
 
 # visualize spread
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='enhanced_crossing_post', kind='bar')
 
-# In[ ]:
+# In[7]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='leading_pedestrian_interval_post', kind='bar')
 
-# In[ ]:
+# In[8]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='signal_retiming_post', kind='bar')
 
-# In[ ]:
+# In[9]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='slow_zones_post', kind='bar')
 
-# In[ ]:
+# In[10]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='speed_humps_post', kind='bar')
 
-# In[ ]:
+# In[11]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='street_improvement_corridors_post', kind='bar')
 
-# In[ ]:
+# In[12]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='street_improvement_project_post', kind='bar')
 
-# In[ ]:
+# In[13]:
 
 
 intersection_intervention_count.groupby(intersection_intervention_count['year']).sum('count').plot(y='turn_traffic_calming_post', kind='bar')
 
-# In[ ]:
+# In[14]:
 
 
 # creating table displaying proportion of each variable that is zero vs non-zero
@@ -142,7 +142,7 @@ summary_table = summary_table.sort_values(by='Percent_Non_Zero', ascending=True)
 
 summary_table
 
-# In[ ]:
+# In[15]:
 
 
 # outcome variable distribution
@@ -154,14 +154,14 @@ plt.ylabel('Frequency')
  
 plt.show()
 
-# In[ ]:
+# In[16]:
 
 
 # most non-zero values are 1
 
 intersection_intervention_ever_treated[intersection_intervention_ever_treated['total_death_or_injury'] > 0]['total_death_or_injury'].mode()
 
-# In[ ]:
+# In[17]:
 
 
 # outcome variable distribution
@@ -173,14 +173,14 @@ plt.ylabel('Frequency')
  
 plt.show()
 
-# In[ ]:
+# In[18]:
 
 
 # most non-zero values are 1
 
 intersection_intervention_ever_treated[intersection_intervention_ever_treated['pedestrian_death_or_injury'] > 0]['pedestrian_death_or_injury'].mode()
 
-# In[ ]:
+# In[19]:
 
 
 # trend in collisions within intersections that received intervention
@@ -216,7 +216,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[20]:
 
 
 # trend in collisions within intersections that received intervention
@@ -252,7 +252,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[21]:
 
 
 # trend in collisions within intersections that received intervention
@@ -288,7 +288,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[22]:
 
 
 # trend in collisions within intersections that received intervention
@@ -324,7 +324,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[23]:
 
 
 # trend in collisions within intersections that received intervention
@@ -360,7 +360,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[24]:
 
 
 # trend in collisions within intersections that received intervention
@@ -396,7 +396,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[25]:
 
 
 # trend in collisions within intersections that received intervention
@@ -432,7 +432,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[26]:
 
 
 # trend in collisions within intersections that received intervention
@@ -468,7 +468,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# In[ ]:
+# In[27]:
 
 
 # checking for multicollinearity
@@ -483,7 +483,7 @@ vif["Variable"] = X.columns
 vif["VIF"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
 print(vif)
 
-# In[ ]:
+# In[28]:
 
 
 # low variance variables
