@@ -569,7 +569,7 @@ head(results_df_disp, 5)
 
 ```{r}
 # best overall ~ speed_limit_post
-# best for KS test ~ scaled_summonses + speed_limit_post
+# best for KS test ~ scaled_pop_density + scaled_traffic_volume + scaled_summonses + covid_2020
 
 # testing both
 
@@ -612,7 +612,7 @@ model_dispformula2 <- glmmTMB(
     ns(scaled_pop_density, df = 2) +        
     scaled_time +       
     (1 | boro_name/ntaname/intersection_id),
-  dispformula = ~ scaled_summonses + speed_limit_post,
+  dispformula = ~ scaled_pop_density + scaled_traffic_volume + scaled_summonses + covid_2020,
   family = nbinom1,
   data = sites_ever_treated
 ) 
