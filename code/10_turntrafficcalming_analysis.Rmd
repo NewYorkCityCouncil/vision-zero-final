@@ -200,7 +200,87 @@ if(all(validation_check$was_treated)) {
 }
 ```
 
+# Regression 
 
+```{r}
+model_spline_ttc <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    ttc_hardened_centerline +
+    ttc_rubber_speed_bump +
+    ttc_quick_kurb +
+    ttc_daylighting +
+    ttc_markings_box +
+    ttc_markings_wedge +
+    ttc_delineators +
+    ttc_median_or_island +
+    ttc_pegatracks +
+    ttc_davidsons +
+    ttc_slow_turn_design +
+    # leading_pedestrian_interval_post +
+    # #enhanced_crossing_post + #not turned on for anything in this data
+    # speed_humps_post +
+    # street_improvement_project_post +
+    # street_improvement_corridors_post +
+    # signal_retiming_post +
+    # slow_zones_post +
+    # speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ttc_only
+) 
+
+summary(model_spline_ttc)
+```
+
+```{r}
+# Get the confidence intervals for the log-coefficients
+ci_log <- confint(model_spline_ttc, parm = "beta_", method = "wald")
+
+# Get the coefficients table from the summary
+summary_table <- summary(model_spline_ttc)$coefficients$cond
+
+# Combine the log-estimates and log-CIs
+log_results <- cbind(summary_table, ci_log)
+
+# Exponentiate everything to get IRRs and their CIs
+irr_results <- exp(log_results)
+
+# Print the final table
+print(irr_results)
+```
+
+```{r}
+# is there multicollinearity?
+
+# no serious issues
+
+check_collinearity(model_spline_ttc)
+```
+
+```{r}
+# diagnostics
+
+sim_res_spline <- simulateResiduals(fittedModel = model_spline_ttc, n = 500, plot = TRUE)
+testZeroInflation(sim_res_spline) # zero-inflation test
+testDispersion(sim_res_spline) # dispersion test
+testUniformity(sim_res_spline) # KS test
+testOutliers(sim_res_spline) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_spline), residuals(model_spline, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
 
 
 
