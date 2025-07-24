@@ -1,0 +1,217 @@
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(glmmTMB)
+library(DHARMa)
+library(effects)
+library(performance)
+library(purrr)
+library(furrr)
+library(splines)
+library(future.apply)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(plotly) 
+library(ggeffects)
+```
+
+# Uploading and Preparing the Data
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+# Assigning values to TTC types
+
+```{r}
+# Assign the result back to the original data.table
+sites_ever_treated_ttc <- sites_ever_treated %>%
+  # Create a temporary, cleaned version of the type string for reliable searching
+  mutate(
+    # Replace NA with an empty string for easier processing
+    # The final dummy will be 0 for these rows anyway
+    ttc_type_clean = ifelse(is.na(turn_traffic_calming_type), "", turn_traffic_calming_type),
+    ttc_type_clean = tolower(ttc_type_clean),
+    # Fix common typos and standardize abbreviations to ensure they are captured
+    ttc_type_clean = str_replace_all(ttc_type_clean, c(
+      "speeed" = "speed",
+      "ruber" = "rubber",
+      "qucik" = "quick",
+      "dayighitng" = "daylighting",
+      "x-walk" = "crosswalk",
+      "rsb" = "rubber speed bump",
+      "hc" = "hardened centerline",
+      "qk" = "quick kurb"
+    ))
+  ) %>%
+  # Create the 11 dummy variables based on keyword detection
+  mutate(
+    # as.integer() converts TRUE/FALSE from str_detect() to 1/0
+    ttc_hardened_centerline = as.integer(str_detect(ttc_type_clean, "hardened centerline")),
+    
+    # <<< THIS IS THE CORRECTED LINE >>>
+    # It now detects "rubber speed" even if "bump" is missing.
+    # The `\\b` is a word boundary to prevent matching parts of other words.
+    ttc_rubber_speed_bump   = as.integer(str_detect(ttc_type_clean, "rubber speed bump|rubber speed\\b")),
+    
+    ttc_quick_kurb          = as.integer(str_detect(ttc_type_clean, "quick kurb|tuff kurb")),
+    ttc_daylighting         = as.integer(str_detect(ttc_type_clean, "daylighting|dayligh")),
+    # Uses a regex with a "negative lookbehind" to find "box" but not "bike box"
+    # and a word boundary `\\b` to ensure it's a whole word.
+    ttc_markings_box        = as.integer(str_detect(ttc_type_clean, "(?<!bike )\\bbox\\b")),
+    ttc_markings_wedge      = as.integer(str_detect(ttc_type_clean, "wedge")),
+    ttc_delineators         = as.integer(str_detect(ttc_type_clean, "delineator")),
+    ttc_median_or_island    = as.integer(str_detect(ttc_type_clean, "median extension|bike island")),
+    ttc_pegatracks          = as.integer(str_detect(ttc_type_clean, "pegatrack")),
+    ttc_davidsons           = as.integer(str_detect(ttc_type_clean, "davidson")),
+    ttc_slow_turn_design    = as.integer(str_detect(ttc_type_clean, "slow turn|right turn"))
+  ) %>%
+  # Remove the temporary cleaning column as it's no longer needed
+  select(-ttc_type_clean)
+```
+
+# Validate new dummy variables
+
+```{r}
+# 1. Get the total counts for each new turn traffic calming component
+ttc_cols <- colnames(sites_ever_treated_ttc)[str_starts(colnames(sites_ever_treated_ttc), "ttc_")]
+
+# Using colSums to get the frequency of each treatment component
+treatment_counts <- colSums(sites_ever_treated_ttc[, ..ttc_cols])
+print("Frequency of each Turn Traffic Calming Component:")
+print(treatment_counts)
+
+# 2. Spot-check a few complex examples to ensure they were parsed correctly
+print("Verification of specific complex cases:")
+sites_ever_treated_ttc %>%
+  filter(
+    # A complex combination treatment
+    str_detect(turn_traffic_calming_type, "Daylighting, Box Markings, Flexible Delineators, Quick Kurb") |
+    # A treatment that should NOT be coded as a 'box'
+    str_detect(turn_traffic_calming_type, "Quick Kurb to bike box")
+    ) %>%
+  # Select the original column and the new dummy columns to show the mapping
+  select(turn_traffic_calming_type, all_of(ttc_cols)) %>%
+  # Use glimpse to display in a readable format
+  glimpse()
+```
+
+# More validation
+
+```{r}
+# Re-define ttc_cols in case the R environment was cleared
+ttc_cols <- colnames(sites_ever_treated_ttc)[str_starts(colnames(sites_ever_treated_ttc), "ttc_")]
+
+# Check 1: Find treatments that were applied but not categorized (False Negatives)
+#--------------------------------------------------------------------------------
+print("--- CHECK 1: Verifying all applied treatments were captured ---")
+
+missed_treatments <- sites_ever_treated_ttc %>%
+  # Filter for rows where a treatment was definitely applied
+  filter(turn_traffic_calming_post == 1) %>%
+  # Calculate the sum of all our new dummy variables for each row
+  mutate(ttc_sum = rowSums(across(all_of(ttc_cols)))) %>%
+  # Filter for rows where a treatment was applied, but our sum is zero
+  filter(ttc_sum == 0)
+
+if (nrow(missed_treatments) == 0) {
+  print("SUCCESS: Every row with turn_traffic_calming_post = 1 has at least one corresponding TTC dummy variable set to 1.")
+} else {
+  print("WARNING: The following treatment types were missed by the keyword search. The logic may need to be updated.")
+  # Show the unique `turn_traffic_calming_type` values that were missed
+  print(unique(missed_treatments$turn_traffic_calming_type))
+}
+
+
+# Check 2: Find rows with no treatment that were incorrectly categorized (False Positives)
+#-----------------------------------------------------------------------------------------
+print("--- CHECK 2: Verifying no treatments were assigned to non-treated rows ---")
+
+false_positives <- sites_ever_treated_ttc %>%
+  # Filter for rows where NO treatment was applied
+  filter(turn_traffic_calming_post == 0) %>%
+  mutate(ttc_sum = rowSums(across(all_of(ttc_cols)))) %>%
+  # Filter for rows where no treatment was applied, but our sum is greater than zero
+  filter(ttc_sum > 0)
+
+if (nrow(false_positives) == 0) {
+  print("SUCCESS: Every row with turn_traffic_calming_post = 0 has all TTC dummy variables set to 0.")
+} else {
+  print("CRITICAL ERROR: Found rows where turn_traffic_calming_post = 0 but TTC dummies were assigned a value of 1. This should not be possible.")
+  print(false_positives %>% select(intersection_id, year, turn_traffic_calming_post, all_of(ttc_cols)))
+}
+```
+
+# Filter dataset to only intersections that ever got TTC
+
+```{r}
+# Identify all intersection_ids that have ever received the TTC treatment
+ttc_treated_ids <- sites_ever_treated_ttc %>%
+  filter(turn_traffic_calming_post == 1) %>%
+  distinct(intersection_id) %>%
+  pull(intersection_id)
+
+# Filter the main dataset to keep only the intersections identified above
+sites_ttc_only <- sites_ever_treated_ttc %>%
+  filter(intersection_id %in% ttc_treated_ids)
+
+# Validation and Summary
+print(paste("Original number of unique intersections:", n_distinct(sites_ever_treated_ttc$intersection_id)))
+print(paste("Number of unique intersections in the new TTC-only dataset:", n_distinct(sites_ttc_only$intersection_id)))
+print(paste("Total rows in original dataset:", nrow(sites_ever_treated_ttc)))
+print(paste("Total rows in new TTC-only dataset:", nrow(sites_ttc_only)))
+
+# A final, robust check: confirm that every single intersection_id remaining in the new dataset did, in fact, receive a treatment at some point
+validation_check <- sites_ttc_only %>%
+  group_by(intersection_id) %>%
+  summarise(was_treated = any(turn_traffic_calming_post == 1)) %>%
+  ungroup()
+
+if(all(validation_check$was_treated)) {
+  print("SUCCESS: Validation passed. All intersections in the 'sites_ttc_only' dataset received TTC treatment in at least one year.")
+} else {
+  print("ERROR: Something went wrong. Not all intersections in the new dataset were treated.")
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
