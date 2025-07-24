@@ -64,6 +64,7 @@ sites_ever_treated_ttc <- sites_ever_treated %>%
       "ruber" = "rubber",
       "qucik" = "quick",
       "dayighitng" = "daylighting",
+      "dayighting" = "daylighting",
       "x-walk" = "crosswalk",
       "rsb" = "rubber speed bump",
       "hc" = "hardened centerline",
@@ -166,6 +167,45 @@ if (nrow(false_positives) == 0) {
   print("CRITICAL ERROR: Found rows where turn_traffic_calming_post = 0 but TTC dummies were assigned a value of 1. This should not be possible.")
   print(false_positives %>% select(intersection_id, year, turn_traffic_calming_post, all_of(ttc_cols)))
 }
+```
+
+# Table for all 94 types 
+
+```{r}
+library(DT) 
+
+# Define the ttc_cols again to ensure this chunk is self-contained
+ttc_cols <- colnames(sites_ever_treated_ttc)[str_starts(colnames(sites_ever_treated_ttc), "ttc_")]
+
+# Create the mapping table
+ttc_mapping_summary <- sites_ever_treated_ttc %>%
+  # Only care about rows where a treatment type was actually specified
+  filter(!is.na(turn_traffic_calming_type)) %>%
+  
+  # Select just the original description and the new dummy variables
+  select(turn_traffic_calming_type, all_of(ttc_cols)) %>%
+  
+  # Find the unique combinations of a description and its corresponding dummy variable values
+  distinct() %>%
+  
+  # Arranging the results alphabetically makes the table easier to read
+  arrange(turn_traffic_calming_type)
+
+# Display the result using an interactive datatable with vertical scrolling.
+datatable(
+  ttc_mapping_summary,
+  options = list(
+    scrollY = '500px', 
+    paging = FALSE,    
+    scrollX = TRUE,   
+    searchHighlight = TRUE 
+  ),
+  rownames = FALSE, 
+  caption = htmltools::tags$caption(
+    style = 'caption-side: top; text-align: left;',
+    'Table: Mapping of Original Turn Traffic Calming Descriptions to New Dummy Variables'
+  )
+)
 ```
 
 # Filter dataset to only intersections that ever got TTC
