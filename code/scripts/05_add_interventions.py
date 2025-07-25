@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 import pandas as pd
@@ -13,7 +13,7 @@ from geopandas import GeoDataFrame
 from shapely.geometry import Point
 from shapely.geometry import MultiLineString, LineString
 
-# In[3]:
+# In[2]:
 
 
 # uploading tables with collision data for every intersection per year
@@ -21,7 +21,7 @@ from shapely.geometry import MultiLineString, LineString
 
 intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_initial.csv')
 
-# In[4]:
+# In[3]:
 
 
 # removing overlap between intersections and streets in both datasets
@@ -48,7 +48,7 @@ nyc_intersections_vz_trimmed_streets['street_geom'] = nyc_intersections_vz_trimm
 nyc_intersections_vz_trimmed_streets['intersection_geom'] = nyc_intersections_vz_trimmed_streets['intersection_geom'].apply(wkt.loads)
 nyc_intersections_vz_trimmed_streets = gpd.GeoDataFrame(nyc_intersections_vz_trimmed_streets, geometry='intersection_geom', crs='epsg:2263')
 
-# In[5]:
+# In[4]:
 
 
 # checking results 
@@ -62,7 +62,7 @@ b.loc[:1000].explore()
 
 # - Intersections impacted: intersections containing the intervention
 
-# In[6]:
+# In[5]:
 
 
 # uploading leading pedestrian interval signal data
@@ -71,7 +71,7 @@ leading_ped_interval_uploaded = gpd.read_file('../data/input/VZV_Leading Pedestr
 # leading_ped_interval_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/xc4v-ntf4.csv?$limit=9999999') # code to pull directly from API
 
 
-# In[7]:
+# In[6]:
 
 
 # cleaning leading pedestrian interval signal data
@@ -84,7 +84,7 @@ leading_ped_interval_gdf = leading_ped_interval_gdf.sort_values('install_da').dr
 leading_ped_interval_gdf = leading_ped_interval_gdf.sort_values('install_da').drop_duplicates(subset=(['geometry']), keep = 'first') # same place, different time (just keeping first occurance)
 
 
-# In[8]:
+# In[7]:
 
 
 # join with intersection dataset
@@ -109,7 +109,7 @@ intersection_intervention_table['leading_pedestrian_interval_post'] = intersecti
 intersection_intervention_table = intersection_intervention_table.drop(columns=['install_da']) # drop
 
 
-# In[9]:
+# In[8]:
 
 
 # looking at results
@@ -133,7 +133,7 @@ bx.drop(columns=['install_da']).explore(m=m, color='red')
 
 # - Intersections impacted: intersections containing the intervention
 
-# In[10]:
+# In[9]:
 
 
 # uploading turn traffic calming data
@@ -141,7 +141,7 @@ bx.drop(columns=['install_da']).explore(m=m, color='red')
 turn_traffic_calming_uploaded = gpd.read_file('../data/input/VZV_Turn Traffic Calming.geojson')
 # turn_traffic_calming_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/yfry-tv4r.csv?$limit=9999999') # code to pull directly from API'
 
-# In[11]:
+# In[10]:
 
 
 # cleaning turn traffic calming data
@@ -157,7 +157,7 @@ turn_traffic_calming_gdf = turn_traffic_calming_gdf.sort_values('completion').dr
 # dropping row with no geometry
 turn_traffic_calming_gdf = turn_traffic_calming_gdf[turn_traffic_calming_gdf['x'] != '0.0']
 
-# In[12]:
+# In[11]:
 
 
 # join with intersection dataset
@@ -190,7 +190,7 @@ intersection_intervention_table.loc[intersection_intervention_table['turn_traffi
 intersection_intervention_table = intersection_intervention_table.drop(columns=['completion']) # drop
 
 
-# In[13]:
+# In[12]:
 
 
 # looking at results
@@ -204,7 +204,7 @@ test = nyc_intersections_vz_trimmed_streets.set_geometry('intersection_geom')
 m = test[test['intersection_id'].isin(qn['intersection_id'].to_list())].drop(columns=['node_geom', 'street_geom']).explore()
 qn.drop(columns=['completion']).explore(m=m, color='red')
 
-# In[17]:
+# In[13]:
 
 
 import pandas as pd
@@ -222,7 +222,7 @@ print(intersection_intervention_table["turn_traffic_calming_type"].value_counts(
 
 # - Intersections impacted: Intersections connected to streets impacted by the change (only if traffic flows toward them)
 
-# In[ ]:
+# In[14]:
 
 
 # uploading speed limit dataset
@@ -230,7 +230,7 @@ print(intersection_intervention_table["turn_traffic_calming_type"].value_counts(
 speed_limits_uploaded = gpd.read_file('../data/input/VZV_Speed Limits.geojson') # downloaded version
 # speed_limits_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/978y-cak4.csv?$limit=9999999') # code to pull directly from API
 
-# In[ ]:
+# In[15]:
 
 
 # cleaning 
@@ -253,7 +253,7 @@ speed_limits_25_gdf = speed_limits_gdf[speed_limits_gdf['postvz_sl'] == '25']
 # speed_limits_25_gdf = speed_limits_gdf[(speed_limits_gdf['postvz_sl'] == '25') & (speed_limits_gdf['postvz_sg'] == 'NO')]
 speed_limits_25_gdf = speed_limits_25_gdf[speed_limits_25_gdf['street'] != 'CONNECTOR'] # removing connectors
 
-# In[ ]:
+# In[16]:
 
 
 # find streets where intervention happened on
@@ -263,7 +263,7 @@ speed_limits_merged_w_streets = gpd.sjoin(speed_limits_25_gdf, nyc_intersections
 # list of all streets with intervention
 speed_intervention_streets = speed_limits_merged_w_streets['PhysicalID'].unique()
 
-# In[ ]:
+# In[17]:
 
 
 # # should I drop any that are paired with more than one street? 
@@ -273,7 +273,7 @@ speed_intervention_streets = speed_limits_merged_w_streets['PhysicalID'].unique(
 # t
 # len(t[t['count'] >1]) / len(t)
 
-# In[ ]:
+# In[18]:
 
 
 # finding nodes impacted by the intervention
@@ -285,7 +285,7 @@ from_intervention_nodes_sl = nyc_intersections_vz_trimmed_streets[(nyc_intersect
 # list of all affected nodes
 sl_intervention_nodes = to_intervention_nodes_sl + from_intervention_nodes_sl
 
-# In[ ]:
+# In[19]:
 
 
 # join with intersection dataset
@@ -300,7 +300,7 @@ intersection_intervention_table['speed_limit_post'] = intersection_intervention_
 # intersection_intervention_table['speed_limit_placebo'] = (intersection_intervention_table['year'] >= (2014 - 2)).astype(int)
 # intersection_intervention_table['speed_limit_placebo'] = intersection_intervention_table['speed_limit_placebo'].fillna(0).astype(int)
 
-# In[ ]:
+# In[20]:
 
 
 # taking a look at one borough to check work for speed limit streets and intersections
@@ -321,7 +321,7 @@ si[si['NODEID'].isin(sl_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom
 
 # - Intersections impacted: Intersections connected to streets impacted by the change (only if traffic flows toward them, and if they themselves fall into the slow zone)
 
-# In[ ]:
+# In[21]:
 
 
 # uploading neighborhood slow zones dataset
@@ -329,7 +329,7 @@ si[si['NODEID'].isin(sl_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom
 slow_zones_uploaded = gpd.read_file('../data/input/VZV_Neighborhood Slow Zones.geojson') # downloaded version
 # slow_zones_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/8p49-aax2.csv?$limit=9999999') # code to pull directly from API
 
-# In[ ]:
+# In[22]:
 
 
 # cleaning neighborhood slow zones data
@@ -346,7 +346,7 @@ nyc_streets_vz_midpoints = gpd.GeoDataFrame(nyc_streets_vz_midpoints, geometry='
 nyc_streets_vz_midpoints['midpoint'] = nyc_streets_vz_midpoints['line_geom'].apply(lambda line: line.interpolate(0.5, normalized=True))
 nyc_streets_vz_midpoints = nyc_streets_vz_midpoints.set_geometry('midpoint')
 
-# In[ ]:
+# In[23]:
 
 
 # join with streets dataset
@@ -360,7 +360,7 @@ slow_zones_merged_w_streets = slow_zones_merged_w_streets.drop_duplicates()
 # only keep first instance of an intersection receiving an intervention if it received more than one
 slow_zones_merged_w_streets = slow_zones_merged_w_streets.sort_values('sz_year').drop_duplicates(subset=['PhysicalID']) 
 
-# In[ ]:
+# In[24]:
 
 
 # finding nodes impacted by the intervention
@@ -374,7 +374,7 @@ from_intervention_nodes_sz = nyc_intersections_vz_trimmed_streets[(nyc_intersect
 # list of all affected nodes
 sz_intervention_nodes = to_intervention_nodes_sz + from_intervention_nodes_sz
 
-# In[ ]:
+# In[25]:
 
 
 # join with intersection dataset
@@ -402,7 +402,7 @@ intersection_intervention_table['slow_zones_post'] = intersection_intervention_t
 intersection_intervention_table = intersection_intervention_table.drop(columns=['sz_year']) # drop
 
 
-# In[ ]:
+# In[26]:
 
 
 # looking at results
@@ -415,7 +415,7 @@ slow_zones_merged_w_intersections.set_geometry('street_geom').drop(columns=['sz_
 
 # - Intersections impacted: Intersections impacted by the intervention AND intersections connected to streets impacted by the intervention (only if traffic flows toward them)
 
-# In[ ]:
+# In[27]:
 
 
 # uploading enhanced crossings dataset
@@ -423,7 +423,7 @@ slow_zones_merged_w_intersections.set_geometry('street_geom').drop(columns=['sz_
 enhanced_crossings_uploaded = gpd.read_file('../data/input/VZV_Enhanced Crossings- Historical.geojson') # downloaded version
 # enhanced_crossings_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/k9a2-vdr8.csv?$limit=9999999') # code to pull directly from API
 
-# In[ ]:
+# In[28]:
 
 
 # cleaning enhanced crossing data
@@ -439,7 +439,7 @@ enhanced_crossings_gdf = enhanced_crossings_gdf.sort_values('date_imple').drop_d
 enhanced_crossings_gdf['geometry'] = enhanced_crossings_gdf['geometry'].buffer(1)
 
 
-# In[ ]:
+# In[29]:
 
 
 # only including those found in intersections
@@ -456,7 +456,7 @@ enhanced_crossings_merged_with_intersections = enhanced_crossings_merged_with_in
 enhanced_crossings_merged_with_intersections = enhanced_crossings_merged_with_intersections.sort_values('date_imple').drop_duplicates(subset=['intersection_id']) 
 
 
-# In[ ]:
+# In[30]:
 
 
 # dozens still need to be matched, but didn't initially match with an intersection through an .sjoin()
@@ -467,7 +467,7 @@ enhanced_crossings_merged_with_streets = gpd.sjoin(enhanced_crossings_in_streets
 # drop exact duplicates
 enhanced_crossings_merged_with_streets = enhanced_crossings_merged_with_streets.drop_duplicates() 
 
-# In[ ]:
+# In[31]:
 
 
 # some of the points were not matched to anything
@@ -497,7 +497,7 @@ enhanced_crossings_merged_with_streets = enhanced_crossings_merged_with_streets.
 # drop cases where more than one intervention is assigned to single intersection (only keep first instance of any intervention as this location)
 enhanced_crossings_merged_with_streets = enhanced_crossings_merged_with_streets.sort_values('date_imple').drop_duplicates(subset=['PhysicalID']) 
 
-# In[ ]:
+# In[32]:
 
 
 # finding nodes impacted by interventions on streets
@@ -514,7 +514,7 @@ ec_intervention_nodes = set(to_intervention_nodes_ec + from_intervention_nodes_e
 # finding nodes affected by the street ECs
 street_ec_nodes = nyc_intersections_vz_trimmed_streets[(nyc_intersections_vz_trimmed_streets['NODEID'].isin(ec_intervention_nodes))]
 
-# In[ ]:
+# In[33]:
 
 
 # matching affected intersections to each PhysicalID
@@ -534,7 +534,7 @@ intersection_intervention_table['enhanced_crossing_post'] = intersection_interve
 # intersection_intervention_table['enhanced_crossing_placebo'] = intersection_intervention_table['enhanced_crossing_placebo'].fillna(0).astype(int)
 intersection_intervention_table = intersection_intervention_table.drop(columns=['date_imple']) # drop
 
-# In[ ]:
+# In[34]:
 
 
 # look at results
@@ -550,7 +550,7 @@ enhanced_crossings_gdf.drop(columns=['date_imple']).explore(m=n, color='red')
 
 # - Intersections impacted: Intersections connected to streets impacted by the intervention (only if traffic flows toward them)
 
-# In[ ]:
+# In[35]:
 
 
 # uploading signal retiming data
@@ -558,7 +558,7 @@ enhanced_crossings_gdf.drop(columns=['date_imple']).explore(m=n, color='red')
 # signal_retiming_uploaded = pd.read_csv('../data/input/VZV_Signal Timing_25MPH Signal Retiming.geojson') # downloaded version
 signal_retiming_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/d8dp-wfee.csv?$limit=9999999') # code to pull directly from API
 
-# In[ ]:
+# In[36]:
 
 
 # cleaning signal retiming dataset
@@ -571,7 +571,7 @@ signal_retiming_gdf = signal_retiming_gdf.to_crs(epsg=2263)
 # dropping duplicates
 signal_retiming_gdf = signal_retiming_gdf.sort_values('yr').drop_duplicates(subset=['the_geom'], keep='first')
 
-# In[ ]:
+# In[37]:
 
 
 # with the spped limit dataset the segments were already separated for each street, for this dataset each geometry is a line covering multiple blocks
@@ -582,7 +582,7 @@ intersections = nyc_intersections_vz_trimmed_streets.set_geometry('intersection_
 streets = signal_retiming_gdf.set_geometry('the_geom')
 signal_retiming_gdf_trimmed_streets = gpd.overlay(streets, intersections, how='difference')
 
-# In[ ]:
+# In[38]:
 
 
 # get midpoints of all the individual lines within a multilinestring
@@ -607,7 +607,7 @@ signal_retiming_gdf_trimmed_streets['midpoint'] = signal_retiming_gdf_trimmed_st
 # explode list of points
 signal_retiming_gdf_trimmed_streets = gpd.GeoDataFrame(signal_retiming_gdf_trimmed_streets.explode('midpoint'), geometry='midpoint', crs='epsg:2263')
 
-# In[ ]:
+# In[39]:
 
 
 # merging with nyc streets
@@ -615,7 +615,7 @@ signal_retiming_gdf_trimmed_streets = gpd.GeoDataFrame(signal_retiming_gdf_trimm
 signal_retiming_merged_w_streets = signal_retiming_gdf_trimmed_streets.sjoin(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']].set_geometry('street_geom'), how = 'left').drop(columns=['index_right'])
 signal_retiming_merged_w_streets = signal_retiming_merged_w_streets.merge(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']], how = 'left')
 
-# In[ ]:
+# In[40]:
 
 
 # some of the points were not matched to street buffers 
@@ -672,7 +672,7 @@ signal_retiming_merged_w_streets = signal_retiming_merged_w_streets[signal_retim
 # only keep first instance of a street receiving and intervention if it received more than one
 signal_retiming_merged_w_streets = signal_retiming_merged_w_streets.sort_values('yr').drop_duplicates(subset=['PhysicalID']) 
 
-# In[ ]:
+# In[41]:
 
 
 # finding nodes impacted by the intervention
@@ -686,7 +686,7 @@ from_intervention_nodes_sr = nyc_intersections_vz_trimmed_streets[(nyc_intersect
 # list of all affected nodes
 sr_intervention_nodes = to_intervention_nodes_sr + from_intervention_nodes_sr
 
-# In[ ]:
+# In[42]:
 
 
 # join with intersection dataset
@@ -711,7 +711,7 @@ intersection_intervention_table['signal_retiming_post'] = intersection_intervent
 intersection_intervention_table = intersection_intervention_table.drop(columns=['yr']) # drop
 
 
-# In[ ]:
+# In[43]:
 
 
 # taking a look at one borough to check work 
@@ -727,11 +727,150 @@ bk = bk.set_geometry('intersection_geom')
 bk[bk['NODEID'].isin(sr_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom', 'NodeIDTo', 'TrafDir', 'intersection_id', 'intersection_geom']].drop_duplicates(subset=['intersection_geom']).explore(m=m, color='blue')
 
 
+# In[50]:
+
+
+# --- START: New Analysis Code (Final Version with Correct Column Name) ---
+
+print("Starting analysis of treated intersections...")
+
+# Step 1: Filter for intersection-years where the signal retiming was active.
+treated_intersection_years = intersection_intervention_table[
+    intersection_intervention_table['signal_retiming_post'] == 1
+].copy()
+
+# Step 2: Aggregate pedestrian injury counts for each treated intersection.
+post_treatment_injury_counts = treated_intersection_years.groupby('intersection_id')['pedestrian_death_or_injury'].sum().reset_index()
+post_treatment_injury_counts.rename(columns={'pedestrian_death_or_injury': 'total_post_treatment_injuries'}, inplace=True)
+
+
+# Step 3: Create a lookup table to link `intersection_id` back to its street name.
+# The debugging output showed the column name is 'on_street' (lowercase).
+
+# Bridge 1: Links PhysicalID to the original on_street name.
+# We now use the correct column name 'on_street'.
+street_name_lookup = signal_retiming_merged_w_streets[['PhysicalID', 'on_street']].drop_duplicates()
+
+
+# Bridge 2: Links intersection_id to the PhysicalID of the street segment.
+intersection_id_lookup = signal_retiming_merged_w_intersections[['intersection_id', 'PhysicalID']].drop_duplicates()
+
+# Now, merge the bridges to create the final lookup table: intersection_id -> on_street
+final_lookup = pd.merge(intersection_id_lookup, street_name_lookup, on='PhysicalID', how='left')
+# An intersection might be linked to multiple street segments, so we'll just keep the first name.
+final_lookup = final_lookup.drop_duplicates(subset='intersection_id')
+
+
+# Step 4: Bring back the geographic and descriptive information.
+intersection_geography = nyc_intersections_vz_trimmed_streets[
+    ['intersection_id', 'intersection_geom']
+].drop_duplicates(subset='intersection_id')
+
+# Merge aggregated injury counts with geography
+ranked_intersections_gdf = pd.merge(
+    intersection_geography, 
+    post_treatment_injury_counts, 
+    on='intersection_id', 
+    how='inner'
+)
+
+# Merge with the final lookup table to add street names
+ranked_intersections_gdf = pd.merge(
+    ranked_intersections_gdf,
+    final_lookup[['intersection_id', 'on_street']],
+    on='intersection_id',
+    how='left'
+)
+
+# Step 5: Rank, display, and visualize.
+ranked_intersections_gdf = ranked_intersections_gdf.sort_values(
+    by='total_post_treatment_injuries', 
+    ascending=False
+).set_geometry('intersection_geom')
+
+# --- OUTPUT ---
+print("\n--- Top 20 Treated Intersections by Post-Intervention Pedestrian Injury Count ---")
+print(ranked_intersections_gdf[['on_street', 'total_post_treatment_injuries', 'intersection_id']].head(20).to_string())
+
+# In[70]:
+
+
+# --- START: New Visualization Code (Tiered Hotspot Strategy) ---
+
+print("Generating a tiered hotspot map for maximum clarity...")
+
+# --- STEP 1: DEFINE THE TIERS & FILTER THE DATA ---
+# We will create two distinct groups of hotspots to plot differently.
+# You can easily adjust these numbers to change what you see.
+
+CRITICAL_THRESHOLD = 40  # The worst of the worst
+SIGNIFICANT_THRESHOLD = 20 # The next level down
+
+# Create a GeoDataFrame for the "Critical" tier
+critical_hotspots_gdf = ranked_intersections_gdf[
+    ranked_intersections_gdf['total_post_treatment_injuries'] >= CRITICAL_THRESHOLD
+]
+
+# Create a GeoDataFrame for the "Significant" tier
+significant_hotspots_gdf = ranked_intersections_gdf[
+    (ranked_intersections_gdf['total_post_treatment_injuries'] >= SIGNIFICANT_THRESHOLD) &
+    (ranked_intersections_gdf['total_post_treatment_injuries'] < CRITICAL_THRESHOLD)
+]
+
+print(f"Found {len(critical_hotspots_gdf)} 'Critical' hotspots (≥ {CRITICAL_THRESHOLD} injuries).")
+print(f"Found {len(significant_hotspots_gdf)} 'Significant' hotspots (between {SIGNIFICANT_THRESHOLD} and {CRITICAL_THRESHOLD} injuries).")
+
+
+# --- STEP 2: BUILD THE MAP IN LAYERS ---
+
+# Layer 1: Start with the clean, grayscale basemap.
+m = signal_retiming_gdf.explore(
+    tiles="CartoDB positron",
+    color="rgba(0,0,0,0)", # Invisible placeholder
+    name="Placeholder"
+)
+
+# Layer 2: Add ALL the treated street corridors for context.
+signal_retiming_gdf.explore(
+    m=m,
+    color="skyblue",
+    style_kwds={'weight': 1.5, 'opacity': 0.5}, # Make them fainter
+    name="All Treated Street Corridors"
+)
+
+# Layer 3: Plot the "Significant" hotspots (the orange, mid-level dots).
+if not significant_hotspots_gdf.empty:
+    significant_hotspots_gdf.explore(
+        m=m,
+        color='orange', # A single, clear color for this tier
+        marker_kwds={'radius': 500, 'stroke': True, 'weight': 1, 'color': 'black'},
+        tooltip=['on_street', 'total_post_treatment_injuries'],
+        popup=True,
+        name=f"Significant Hotspots ({SIGNIFICANT_THRESHOLD}-{CRITICAL_THRESHOLD-1} Injuries)"
+    )
+
+# Layer 4: Plot the "Critical" hotspots on top of everything else.
+# This is the layer that will POP.
+if not critical_hotspots_gdf.empty:
+    critical_hotspots_gdf.explore(
+        m=m,
+        color='red', # A single, bright color
+        # Larger radius and thicker stroke make these stand out
+        marker_kwds={'radius': 1000, 'stroke': True, 'weight': 2, 'color': 'black'},
+        tooltip=['on_street', 'total_post_treatment_injuries'],
+        popup=True,
+        name=f"Critical Hotspots (≥ {CRITICAL_THRESHOLD} Injuries)"
+    )
+
+import folium
+folium.LayerControl().add_to(m)
+m
+
 # #### Speed Humps
 
 # - Intersections impacted: Intersections connected to streets impacted by the intervention (only if traffic flows toward them)
 
-# In[ ]:
+# In[71]:
 
 
 # uploading speed bump data
@@ -739,7 +878,7 @@ bk[bk['NODEID'].isin(sr_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom
 speed_humps_uploaded = gpd.read_file('../data/input/VZV_Speed Humps.geojson') # downloaded version
 # speed_humps_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/yjra-caqx.csv?$limit=9999999') # code to pull directly from API
 
-# In[ ]:
+# In[72]:
 
 
 # cleaning speed bumps dataset
@@ -753,7 +892,7 @@ speed_humps_gdf = speed_humps_gdf.sort_values('date_insta').drop_duplicates(subs
 # adding speed hump id
 speed_humps_gdf.insert(0, 'hump_id', value=range(len(speed_humps_gdf))) # creating ID column
 
-# In[ ]:
+# In[73]:
 
 
 # trimming lines showing the speed hump corridors with intersections
@@ -762,7 +901,7 @@ intersections = nyc_intersections_vz_trimmed_streets.set_geometry('intersection_
 streets = speed_humps_gdf.set_geometry('geometry')
 speed_humps_gdf_trimmed_streets = gpd.overlay(streets, intersections, how='difference')
 
-# In[ ]:
+# In[74]:
 
 
 # taking the midpoint of every line associated with each speed hump entry
@@ -772,7 +911,7 @@ speed_humps_gdf_trimmed_streets['midpoint'] = speed_humps_gdf_trimmed_streets['g
 # explode list of points
 speed_humps_gdf_trimmed_streets = gpd.GeoDataFrame(speed_humps_gdf_trimmed_streets.explode('midpoint'), geometry='midpoint', crs='epsg:2263')
 
-# In[ ]:
+# In[75]:
 
 
 # removing hump_ids that have more segments associated with them than total # of humps
@@ -783,7 +922,7 @@ group_by_hump_id = (speed_humps_gdf_trimmed_streets.groupby('hump_id').agg(num_o
 hump_ids_to_keep = group_by_hump_id[group_by_hump_id['num_of_segments'] <= group_by_hump_id['num_of_humps']].index.to_list()
 speed_humps_gdf_trimmed_streets = speed_humps_gdf_trimmed_streets[speed_humps_gdf_trimmed_streets['hump_id'].isin(hump_ids_to_keep)]
 
-# In[ ]:
+# In[76]:
 
 
 # merging with nyc streets
@@ -791,7 +930,7 @@ speed_humps_gdf_trimmed_streets = speed_humps_gdf_trimmed_streets[speed_humps_gd
 speed_humps_merged_w_streets = speed_humps_gdf_trimmed_streets.sjoin(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']].set_geometry('street_geom'), how = 'left').drop(columns=['index_right'])
 speed_humps_merged_w_streets = speed_humps_merged_w_streets.merge(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']], how = 'left')
 
-# In[ ]:
+# In[77]:
 
 
 # some of the points were not matched to street buffers 
@@ -812,7 +951,7 @@ add_missing_df = add_missing_df.merge(nyc_intersections_vz_trimmed_streets[['str
 # add newly matched points to original dataset
 speed_humps_merged_w_streets = pd.concat([speed_humps_merged_w_streets, add_missing_df])
 
-# In[ ]:
+# In[78]:
 
 
 # finding nodes impacted by the intervention
@@ -826,7 +965,7 @@ from_intervention_nodes_sh = nyc_intersections_vz_trimmed_streets[(nyc_intersect
 # list of all affected nodes
 sh_intervention_nodes = to_intervention_nodes_sh + from_intervention_nodes_sh
 
-# In[ ]:
+# In[79]:
 
 
 # join with intersection dataset
@@ -851,7 +990,7 @@ intersection_intervention_table['speed_humps_post'] = intersection_intervention_
 intersection_intervention_table = intersection_intervention_table.drop(columns=['date_insta']) # drop
 
 
-# In[ ]:
+# In[80]:
 
 
 # taking a look at one borough to check work 
@@ -871,7 +1010,7 @@ qn[qn['NODEID'].isin(sh_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom
 
 # - Intersections impacted: Intersections impacted by the intervention
 
-# In[ ]:
+# In[81]:
 
 
 # uploading SIP intersection data
@@ -880,7 +1019,7 @@ street_improvement_intersection_uploaded = gpd.read_file('../data/input/VZV_Stre
 # street_improvement_projects_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/shr7-eqdc.csv?$limit=9999999') # code to pull directly from API
 
 
-# In[ ]:
+# In[82]:
 
 
 # cleaning street improvement project data
@@ -888,7 +1027,7 @@ street_improvement_intersection_uploaded = gpd.read_file('../data/input/VZV_Stre
 street_improvement_intersection_gdf = street_improvement_intersection_uploaded.to_crs({'init': 'epsg:2263'}) 
 street_improvement_intersection_gdf['end_date'] = pd.to_datetime(street_improvement_intersection_gdf['end_date'])
 
-# In[ ]:
+# In[83]:
 
 
 # no real evidence of meaningful overlap between datasets
@@ -914,7 +1053,7 @@ s = sip.sjoin(i)
 length = len(s[s['end_date'] == s['install_da']])
 print(f'Number of SIP intersections installed at same time and place as leading pedestrian interval signal: {length}')
 
-# In[ ]:
+# In[84]:
 
 
 # join with intersection dataset
@@ -937,7 +1076,7 @@ intersection_intervention_table['street_improvement_project_post'] = intersectio
 intersection_intervention_table = intersection_intervention_table.drop(columns=['end_date']) # drop
 
 
-# In[ ]:
+# In[85]:
 
 
 # checking work
@@ -948,7 +1087,7 @@ street_improvement_intersection_merged_w_intersections.merge(nyc_intersections_v
 
 # - Intersections impacted: Intersections connected to streets impacted by the intervention (only if traffic flows toward them)
 
-# In[ ]:
+# In[86]:
 
 
 # uploading SIP corridor data
@@ -956,7 +1095,7 @@ street_improvement_intersection_merged_w_intersections.merge(nyc_intersections_v
 street_improvement_corridors_uploaded = gpd.read_file('../data/input/VZV_Street Improvement Projects (SIPs) Corridor.geojson')
 # street_improvement_corridors_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/2tid-5tcf.csv?$limit=999999')
 
-# In[ ]:
+# In[87]:
 
 
 # cleaning street improvement corridor data
@@ -964,7 +1103,7 @@ street_improvement_corridors_uploaded = gpd.read_file('../data/input/VZV_Street 
 street_improvement_corridors_gdf = street_improvement_corridors_uploaded.to_crs({'init': 'epsg:2263'}) 
 street_improvement_corridors_gdf['end_date'] = pd.to_datetime(street_improvement_corridors_gdf['end_date'])
 
-# In[ ]:
+# In[88]:
 
 
 # no real evidence of meaningful overlap between datasets
@@ -985,7 +1124,7 @@ s = sip.sjoin(i)
 length = len(s[s['sip_year'] == s['yr']])
 print(f'Number of SIP corridors installed at same time and place as signal retiming: {length}')
 
-# In[ ]:
+# In[89]:
 
 
 # trimming lines showing the signal retiming corridors with intersections
@@ -994,7 +1133,7 @@ intersections = nyc_intersections_vz_trimmed_streets.set_geometry('intersection_
 streets = street_improvement_corridors_gdf.set_geometry('geometry')
 street_improvement_corridors_gdf_trimmed_streets = gpd.overlay(streets, intersections, how='difference')
 
-# In[ ]:
+# In[90]:
 
 
 # taking the midpoint of every line associated with each speed hump entry
@@ -1004,7 +1143,7 @@ street_improvement_corridors_gdf_trimmed_streets['midpoint'] = street_improvemen
 # explode list of points
 street_improvement_corridors_gdf_trimmed_streets = gpd.GeoDataFrame(street_improvement_corridors_gdf_trimmed_streets.explode('midpoint'), geometry='midpoint', crs='epsg:2263')
 
-# In[ ]:
+# In[91]:
 
 
 # merging with nyc streets
@@ -1013,7 +1152,7 @@ street_improvement_corridors_merged_w_streets = street_improvement_corridors_gdf
 street_improvement_corridors_merged_w_streets = street_improvement_corridors_merged_w_streets.merge(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']], how = 'left')
 
 
-# In[ ]:
+# In[92]:
 
 
 # some of the points were not matched to street buffers 
@@ -1056,7 +1195,7 @@ street_improvement_corridors_merged_w_streets = street_improvement_corridors_mer
 # only keep first instance of a street receiving and intervention if it received more than one
 street_improvement_corridors_merged_w_streets = street_improvement_corridors_merged_w_streets.sort_values('end_date').drop_duplicates(subset=['PhysicalID']) 
 
-# In[ ]:
+# In[93]:
 
 
 # finding nodes impacted by the intervention
@@ -1071,7 +1210,7 @@ from_intervention_nodes_ic = nyc_intersections_vz_trimmed_streets[(nyc_intersect
 ic_intervention_nodes = to_intervention_nodes_ic + from_intervention_nodes_ic
 
 
-# In[ ]:
+# In[94]:
 
 
 # join with intersection dataset
@@ -1097,7 +1236,7 @@ intersection_intervention_table = intersection_intervention_table.drop(columns=[
 
 
 
-# In[ ]:
+# In[95]:
 
 
 # taking a look at one borough to check work 
