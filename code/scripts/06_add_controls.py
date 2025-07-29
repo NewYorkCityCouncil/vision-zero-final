@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[18]:
+# In[1]:
 
 
 import pandas as pd
@@ -11,7 +11,7 @@ from geopandas import gpd
 from shapely import wkt
 from geopandas import GeoDataFrame
 
-# In[19]:
+# In[2]:
 
 
 # uploaded finished intervention tables from 05_add_interventions.ipynb
@@ -22,7 +22,7 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 
 # ##### Population
 
-# In[20]:
+# In[3]:
 
 
 # from https://www.macrotrends.net/global-metrics/cities/23083/new-york-city/population
@@ -31,7 +31,7 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 annual_pop = pd.read_csv('../data/input/nyc-metro-area_population_annual.csv').drop(columns=['Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6'])
 annual_pop['Population'] = annual_pop['Population'].str.replace(',', '').astype(int)
 
-# In[21]:
+# In[4]:
 
 
 # merging
@@ -40,7 +40,7 @@ intersection_intervention_table = intersection_intervention_table.merge(annual_p
 
 # ##### Criminal Summonses - Traffic
 
-# In[22]:
+# In[5]:
 
 
 # uncomment to pull from API and save
@@ -56,7 +56,7 @@ traffic_summonses = pd.read_csv('../data/input/nyc_criminal-summonses_traffic_hi
 traffic_summonses['summons_date'] = pd.to_datetime(traffic_summonses['summons_date'])
 traffic_summonses = traffic_summonses.drop_duplicates()
 
-# In[23]:
+# In[6]:
 
 
 # group by year
@@ -65,7 +65,7 @@ traffic_summonses_monthly = traffic_summonses[['summons_key']].groupby(traffic_s
 # merging with interventions dataset
 intersection_intervention_table = intersection_intervention_table.merge(traffic_summonses_monthly[['year', 'citywide_traffic_summonses']], on='year', how = 'left')
 
-# In[24]:
+# In[7]:
 
 
 # looking at obsevration time period
@@ -76,7 +76,7 @@ traffic_summonses_monthly.set_index('year').loc['2013':'2023'].plot()
 
 # A measure of traffic volume
 
-# In[25]:
+# In[8]:
 
 
 # manually compiled from https://www.fhwa.dot.gov/policyinformation/statistics/{INSERT YEAR}/hm71.cfm
@@ -114,7 +114,7 @@ df_with_prediction = pd.concat(
 ).sort_values('Year')
 
 
-# In[26]:
+# In[9]:
 
 
 # add to intervention df
@@ -122,14 +122,14 @@ df_with_prediction = pd.concat(
 # match types
 intersection_intervention_table = intersection_intervention_table.merge(df_with_prediction, left_on = 'year', right_on = 'Year', how = 'left').drop(columns=['Year']).rename(columns={'total minus highways':'nyc_metro_dvmt'})
 
-# In[27]:
+# In[10]:
 
 
 df_with_prediction.set_index('Year')[['total minus highways']].loc['2013':'2023'].plot()
 
 # #### NTA Population Density
 
-# In[28]:
+# In[11]:
 
 
 # uploading NTA population numbers for 2009-2013, 2014-2018, and 2019-2023
@@ -161,7 +161,7 @@ nta_pop_2023['acs_year'] = 2023
 # combine
 nta_pop_numbers = pd.concat([nta_pop_2013, nta_pop_2018, nta_pop_2023])[['ntaname','acs_year', 'pop_per_sqmi', 'geometry']]
 
-# In[29]:
+# In[12]:
 
 
 # get intersection locations
@@ -179,7 +179,7 @@ intersections_matched_to_nta = intersections_matched_to_nta.drop_duplicates(subs
 # now match intersections to population density associated with each NTA/ year combo
 intersections_matched_to_pop = intersections_matched_to_nta.merge(nta_pop_numbers, on='ntaname').drop(columns=['intersection_geom'])
 
-# In[30]:
+# In[13]:
 
 
 # making it easier to map population density by year and intersection_id
@@ -192,7 +192,7 @@ intersection_intervention_table = intersection_intervention_table.merge(intersec
 
 # #### Borough
 
-# In[31]:
+# In[14]:
 
 
 # get intersection-borough matches
@@ -208,7 +208,7 @@ intersection_intervention_table = intersection_intervention_table.merge(intersec
 
 # #### COVID
 
-# In[32]:
+# In[15]:
 
 
 # covid
@@ -220,7 +220,7 @@ intersection_intervention_table['covid_pre_post'] = np.where(intersection_interv
 
 # ##### Time Trend
 
-# In[33]:
+# In[16]:
 
 
 # calculate the total number of years elapsed (time trend)
@@ -228,7 +228,7 @@ intersection_intervention_table['time'] = intersection_intervention_table['year'
 
 # ##### Download
 
-# In[34]:
+# In[17]:
 
 
 # when finished, download
