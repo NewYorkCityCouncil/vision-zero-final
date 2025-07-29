@@ -256,14 +256,14 @@ model_spline_ttc <- glmmTMB(
     ttc_pegatracks +
     ttc_davidsons +
     ttc_slow_turn_design +
-    # leading_pedestrian_interval_post +
-    # #enhanced_crossing_post + #not turned on for anything in this data
-    # speed_humps_post +
-    # street_improvement_project_post +
-    # street_improvement_corridors_post +
-    # signal_retiming_post +
-    # slow_zones_post +
-    # speed_limit_post +
+    leading_pedestrian_interval_post +
+    #enhanced_crossing_post + #not turned on for anything in this data
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
     covid_2020 + 
     scaled_summonses + 
     scaled_traffic_volume + 
@@ -316,12 +316,11 @@ testOutliers(sim_res_spline) # outliers
 # plotting residuals for model
 # exhibits hetereoskedasticity
 
-plot(fitted(model_spline), residuals(model_spline, type = "pearson"),
+plot(fitted(model_spline_ttc), residuals(model_spline_ttc, type = "pearson"),
      xlab = "Fitted Values", ylab = "Pearson Residuals",
      main = "Residuals vs Fitted Values")
 abline(h = 0, col = "red")
 ```
-
 
 
 
