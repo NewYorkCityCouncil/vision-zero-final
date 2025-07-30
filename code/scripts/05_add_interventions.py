@@ -727,41 +727,39 @@ bk = bk.set_geometry('intersection_geom')
 bk[bk['NODEID'].isin(sr_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom', 'NodeIDTo', 'TrafDir', 'intersection_id', 'intersection_geom']].drop_duplicates(subset=['intersection_geom']).explore(m=m, color='blue')
 
 
-# In[50]:
+# In[ ]:
 
 
-# --- START: New Analysis Code (Final Version with Correct Column Name) ---
+# --- New Analysis Code ---
 
 print("Starting analysis of treated intersections...")
 
-# Step 1: Filter for intersection-years where the signal retiming was active.
+# Step 1: Filter for intersection-years where the signal retiming was active
 treated_intersection_years = intersection_intervention_table[
     intersection_intervention_table['signal_retiming_post'] == 1
 ].copy()
 
-# Step 2: Aggregate pedestrian injury counts for each treated intersection.
+# Step 2: Aggregate pedestrian injury counts for each treated intersection
 post_treatment_injury_counts = treated_intersection_years.groupby('intersection_id')['pedestrian_death_or_injury'].sum().reset_index()
 post_treatment_injury_counts.rename(columns={'pedestrian_death_or_injury': 'total_post_treatment_injuries'}, inplace=True)
 
 
-# Step 3: Create a lookup table to link `intersection_id` back to its street name.
-# The debugging output showed the column name is 'on_street' (lowercase).
+# Step 3: Create a lookup table to link `intersection_id` back to its street name
 
-# Bridge 1: Links PhysicalID to the original on_street name.
-# We now use the correct column name 'on_street'.
+# Bridge 1: Links PhysicalID to the original on_street name
 street_name_lookup = signal_retiming_merged_w_streets[['PhysicalID', 'on_street']].drop_duplicates()
 
 
-# Bridge 2: Links intersection_id to the PhysicalID of the street segment.
+# Bridge 2: Links intersection_id to the PhysicalID of the street segment
 intersection_id_lookup = signal_retiming_merged_w_intersections[['intersection_id', 'PhysicalID']].drop_duplicates()
 
-# Now, merge the bridges to create the final lookup table: intersection_id -> on_street
+# Merge the bridges to create the final lookup table: intersection_id -> on_street
 final_lookup = pd.merge(intersection_id_lookup, street_name_lookup, on='PhysicalID', how='left')
-# An intersection might be linked to multiple street segments, so we'll just keep the first name.
+# An intersection might be linked to multiple street segments, so we'll just keep the first name
 final_lookup = final_lookup.drop_duplicates(subset='intersection_id')
 
 
-# Step 4: Bring back the geographic and descriptive information.
+# Step 4: Bring back the geographic and descriptive information
 intersection_geography = nyc_intersections_vz_trimmed_streets[
     ['intersection_id', 'intersection_geom']
 ].drop_duplicates(subset='intersection_id')
@@ -782,7 +780,7 @@ ranked_intersections_gdf = pd.merge(
     how='left'
 )
 
-# Step 5: Rank, display, and visualize.
+# Step 5: Rank, display, and visualize
 ranked_intersections_gdf = ranked_intersections_gdf.sort_values(
     by='total_post_treatment_injuries', 
     ascending=False
@@ -792,16 +790,14 @@ ranked_intersections_gdf = ranked_intersections_gdf.sort_values(
 print("\n--- Top 20 Treated Intersections by Post-Intervention Pedestrian Injury Count ---")
 print(ranked_intersections_gdf[['on_street', 'total_post_treatment_injuries', 'intersection_id']].head(20).to_string())
 
-# In[70]:
+# In[ ]:
 
 
-# --- START: New Visualization Code (Tiered Hotspot Strategy) ---
+# --- Visualization Code ---
 
 print("Generating a tiered hotspot map for maximum clarity...")
 
 # --- STEP 1: DEFINE THE TIERS & FILTER THE DATA ---
-# We will create two distinct groups of hotspots to plot differently.
-# You can easily adjust these numbers to change what you see.
 
 CRITICAL_THRESHOLD = 40  # The worst of the worst
 SIGNIFICANT_THRESHOLD = 20 # The next level down
@@ -823,14 +819,14 @@ print(f"Found {len(significant_hotspots_gdf)} 'Significant' hotspots (between {S
 
 # --- STEP 2: BUILD THE MAP IN LAYERS ---
 
-# Layer 1: Start with the clean, grayscale basemap.
+# Layer 1: Start with the clean, grayscale basemap
 m = signal_retiming_gdf.explore(
     tiles="CartoDB positron",
     color="rgba(0,0,0,0)", # Invisible placeholder
     name="Placeholder"
 )
 
-# Layer 2: Add ALL the treated street corridors for context.
+# Layer 2: Add ALL the treated street corridors for context
 signal_retiming_gdf.explore(
     m=m,
     color="skyblue",
@@ -838,7 +834,7 @@ signal_retiming_gdf.explore(
     name="All Treated Street Corridors"
 )
 
-# Layer 3: Plot the "Significant" hotspots (the orange, mid-level dots).
+# Layer 3: Plot the "Significant" hotspots (the orange, mid-level dots)
 if not significant_hotspots_gdf.empty:
     significant_hotspots_gdf.explore(
         m=m,
@@ -849,8 +845,7 @@ if not significant_hotspots_gdf.empty:
         name=f"Significant Hotspots ({SIGNIFICANT_THRESHOLD}-{CRITICAL_THRESHOLD-1} Injuries)"
     )
 
-# Layer 4: Plot the "Critical" hotspots on top of everything else.
-# This is the layer that will POP.
+# Layer 4: Plot the "Critical" hotspots on top of everything else
 if not critical_hotspots_gdf.empty:
     critical_hotspots_gdf.explore(
         m=m,
