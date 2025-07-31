@@ -257,7 +257,8 @@ model_spline_ttc <- glmmTMB(
     ttc_davidsons +
     ttc_slow_turn_design +
     leading_pedestrian_interval_post +
-    #enhanced_crossing_post + #not turned on for anything in this data
+    # turn_traffic_calming_post +
+    enhanced_crossing_post + #not turned on for anything in this data
     speed_humps_post +
     street_improvement_project_post +
     street_improvement_corridors_post +
@@ -271,7 +272,7 @@ model_spline_ttc <- glmmTMB(
     scaled_time +   
     (1 | boro_name/ntaname/intersection_id),
   family = nbinom1,
-  data = sites_ttc_only
+  data = sites_ever_treated_ttc
 ) 
 
 summary(model_spline_ttc)
