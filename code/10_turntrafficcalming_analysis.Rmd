@@ -75,12 +75,7 @@ sites_ever_treated_ttc <- sites_ever_treated %>%
   mutate(
     # as.integer() converts TRUE/FALSE from str_detect() to 1/0
     ttc_hardened_centerline = as.integer(str_detect(ttc_type_clean, "hardened centerline")),
-    
-    # <<< THIS IS THE CORRECTED LINE >>>
-    # It now detects "rubber speed" even if "bump" is missing.
-    # The `\\b` is a word boundary to prevent matching parts of other words.
     ttc_rubber_speed_bump   = as.integer(str_detect(ttc_type_clean, "rubber speed bump|rubber speed\\b")),
-    
     ttc_quick_kurb          = as.integer(str_detect(ttc_type_clean, "quick kurb|tuff kurb")),
     ttc_daylighting         = as.integer(str_detect(ttc_type_clean, "daylighting|dayligh")),
     # Uses a regex with a "negative lookbehind" to find "box" but not "bike box"
