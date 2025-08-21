@@ -152,95 +152,52 @@ obs_count_table.to_csv('../data/output/observations-by-intervention-type_2015-20
 
 obs_count_table
 
-# In[14]:
+# In[28]:
 
 
 # new dataset with all intersections ever treated between 2015 and 2022, and source column
 
-# 1. LOAD DATA AND DEFINE INTERVENTION LISTS
+# 1. LOAD DATA AND DEFINE LISTS
 print("Loading data...")
-intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_final.csv')
+original_df = pd.read_csv('../data/output/intersection_intervention_table_final.csv', low_memory=False)
 
-# Define the "major" or "other" interventions.
 other_interventions = [
     'leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'slow_zones_post', 
     'signal_retiming_post', 'speed_humps_post', 'street_improvement_project_post', 
     'street_improvement_corridors_post', 'enhanced_crossing_post'
 ]
 
-# --- STEP 2: IDENTIFY THE TWO COHORTS OF INTERSECTIONS ---
+# 2. IDENTIFY COHORTS WITH CORRECTED LOGIC
+print("Identifying cohorts with corrected logic...")
 
-# --- COHORT A: 'other_interventions' (Using the Restrictive Logic) ---
-# Inclusion Rule: An intersection is included ONLY IF ALL of its 'other' interventions
-# occurred between 2015 and 2021, inclusive.
-
-print("Identifying 'other_interventions' cohort using the restrictive 2015-2021 window...")
-
-# Melt the dataframe on ONLY the 'other' interventions.
-df_long_other = intersection_intervention_table.melt(
-    id_vars=['intersection_id', 'year'],
-    value_vars=other_interventions,
-    var_name='intervention_type',
-    value_name='is_active'
-)
-
-# Find the start year for EACH specific intervention type at each intersection.
-# This is the key step for the restrictive logic.
-intervention_start_dates = df_long_other[df_long_other['is_active'] == 1]\
-    .groupby(['intersection_id', 'intervention_type'])['year'].min().reset_index()\
-    .rename(columns={'year': 'start_year'})
-
-# Identify all intersection IDs that have at least one 'other' intervention.
+# --- COHORT A: 'other_interventions' (Restrictive "Clean History" Rule) ---
+# This logic remains the same as your original request.
+df_long_other = original_df.melt(id_vars=['intersection_id', 'year'], value_vars=other_interventions, var_name='intervention_type', value_name='is_active')
+intervention_start_dates = df_long_other[df_long_other['is_active'] == 1].groupby(['intersection_id', 'intervention_type'])['year'].min().reset_index().rename(columns={'year': 'start_year'})
 all_ids_with_other_interventions = set(intervention_start_dates['intersection_id'])
+ids_to_remove_due_to_outside_treatment = set(intervention_start_dates[~intervention_start_dates['start_year'].between(2015, 2021)]['intersection_id'])
+other_interventions_cohort_ids = all_ids_with_other_interventions - ids_to_remove_due_to_outside_treatment
 
-# Now, find any intersection ID that has a start_year outside the 2015-2021 window.
-ids_to_remove = set(
-    intervention_start_dates[
-        (intervention_start_dates['start_year'] < 2015) | (intervention_start_dates['start_year'] > 2021)
-    ]['intersection_id']
-)
-print(f"Found {len(ids_to_remove):,} intersections with treatments outside the window to be excluded.")
+# --- COHORT B: 'speed_limit_only' (CORRECTED DEFINITION) ---
+# Must have speed_limit_post=1 at some point, and never have an 'other' intervention.
+ids_with_speed_limit = set(original_df[original_df['speed_limit_post'] == 1]['intersection_id'])
+# The correct set is those with speed limit MINUS those that also had other treatments.
+speed_limit_only_cohort_ids = ids_with_speed_limit - all_ids_with_other_interventions
 
-# The final cohort is the set of all treated intersections MINUS the ones to be removed.
-other_interventions_cohort_ids = all_ids_with_other_interventions - ids_to_remove
-print(f"Found {len(other_interventions_cohort_ids):,} intersections for the final 'other_interventions' cohort.")
-
-
-# --- COHORT B: 'speed_limit_only' (Logic Unchanged) ---
-# Inclusion Rule: Intersection has NEVER received ANY of the 8 targeted interventions.
-
-print("\nIdentifying 'speed_limit_only' cohort...")
-# The set of IDs that ever received an 'other' intervention is `all_ids_with_other_interventions`
-all_intersection_ids = set(intersection_intervention_table['intersection_id'].unique())
-speed_limit_only_cohort_ids = all_intersection_ids - all_ids_with_other_interventions
-print(f"Found {len(speed_limit_only_cohort_ids):,} intersections that received NO 'other' interventions.")
-
-
-# --- STEP 3: COMBINE COHORTS AND BUILD THE FINAL DATAFRAME ---
-
-# Combine the IDs from both cohorts into the final list of intersections.
+# 3. COMBINE COHORTS AND BUILD DATAFRAME
 final_cohort_ids = other_interventions_cohort_ids.union(speed_limit_only_cohort_ids)
 print(f"\nTotal unique intersections in the final dataset: {len(final_cohort_ids):,}")
 
-# Filter the original dataframe to include all data for these selected intersections.
-final_df_all_years = intersection_intervention_table[
-    intersection_intervention_table['intersection_id'].isin(final_cohort_ids)
-].copy()
+final_df_all_years = original_df[original_df['intersection_id'].isin(final_cohort_ids)].copy()
+final_df_all_years['source'] = np.where(final_df_all_years['intersection_id'].isin(speed_limit_only_cohort_ids), 'speed_limit_only', 'other_interventions')
+final_analytic_df = final_df_all_years[final_df_all_years['year'].between(2013, 2023)]
 
-# Create the 'source' column.
-final_df_all_years['source'] = np.where(
-    final_df_all_years['intersection_id'].isin(speed_limit_only_cohort_ids),
-    'speed_limit_only',
-    'other_interventions'
-)
-
-# Apply the final observation window (2013-2023) to the panel data.
-final_analytic_df = final_df_all_years[
-    final_df_all_years['year'].between(2013, 2023, inclusive='both')
-]
-
-
-# --- STEP 4: VALIDATE AND SAVE ---
+# 4. SAVE THE CORRECTED DATASET
+output_path = '../data/output/intersection_intervention_table_with_speed_limit_only_2015-2022.csv'
+final_analytic_df.to_csv(output_path, index=False)
+print(f"\nSuccessfully created and saved the CORRECTED dataset to: {output_path}")
+new_row_count = len(final_analytic_df)
+print(f"Total rows in CORRECTED final dataset: {new_row_count:,}")
 
 print("\n--- Validation Results ---")
 print(f"Total rows in final dataframe: {len(final_analytic_df):,}")
@@ -248,13 +205,113 @@ print(f"Total rows in final dataframe: {len(final_analytic_df):,}")
 print("\nBreakdown of total row counts by 'source':")
 print(final_analytic_df['source'].value_counts())
 
-# Save the final dataset
-output_path = '../data/output/intersection_intervention_table_with_speed_limit_only_2015-2022.csv'
-final_analytic_df.to_csv(output_path, index=False)
-
-print(f"\nSuccessfully created and saved the new dataset with restrictive logic to: {output_path}")
+# In[29]:
 
 
+# --- THE COMPLETE UNIVERSE AUDIT SCRIPT ---
+
+print("--- Starting Full Audit of All Kept and Dropped Rows ---")
+
+# 1. LOAD DATA AND DEFINE CONSTANTS
+print("\nStep 1: Loading dataframes and defining constants...")
+original_df = pd.read_csv('../data/output/intersection_intervention_table_final.csv', low_memory=False)
+final_df = pd.read_csv('../data/output/intersection_intervention_table_with_speed_limit_only_2015-2022.csv')
+
+other_interventions = [
+    'leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'slow_zones_post', 
+    'signal_retiming_post', 'speed_humps_post', 'street_improvement_project_post', 
+    'street_improvement_corridors_post', 'enhanced_crossing_post'
+]
+all_interventions = other_interventions + ['speed_limit_post']
+
+# 2. PARTITION ALL INTERSECTIONS INTO FIVE MUTUALLY EXCLUSIVE GROUPS
+print("\nStep 2: Partitioning every intersection into one of five final categories...")
+
+# --- Group 1 & 2: The Intersections that were KEPT ---
+ids_kept_other_interventions = set(final_df[final_df['source'] == 'other_interventions']['intersection_id'])
+ids_kept_speed_limit_only = set(final_df[final_df['source'] == 'speed_limit_only']['intersection_id'])
+
+# --- Group 3, 4, & 5: The Intersections that were DROPPED ---
+original_ids = set(original_df['intersection_id'].unique())
+final_ids = set(final_df['intersection_id'].unique())
+dropped_ids = original_ids - final_ids
+
+# Dropped Reason C: Never treated with ANY intervention at all.
+ever_treated_ids = set(original_df.loc[(original_df[all_interventions] == 1).any(axis=1), 'intersection_id'])
+ids_dropped_reason_C = original_ids - ever_treated_ids
+
+# Dropped Reasons A & B: Treated with 'other' but failed the "clean history" rule.
+remaining_dropped_ids = dropped_ids - ids_dropped_reason_C
+ids_treated_in_window = set(original_df[
+    (original_df['year'].between(2015, 2021)) & ((original_df[other_interventions] == 1).any(axis=1))
+]['intersection_id'])
+
+ids_dropped_reason_A = {id for id in remaining_dropped_ids if id not in ids_treated_in_window}
+ids_dropped_reason_B = {id for id in remaining_dropped_ids if id in ids_treated_in_window}
+
+# --- Report on the partitioning of INTERSECTIONS ---
+print("\n--- Breakdown of ALL Intersections by Final Category ---")
+print(f"Total Intersections in Universe: {len(original_ids):,}")
+print("-" * 55)
+print(f"  KEPT: 'other_interventions' (clean history): {len(ids_kept_other_interventions):,}")
+print(f"  KEPT: 'speed_limit_only' (correctly defined): {len(ids_kept_speed_limit_only):,}")
+print(f"DROPPED A: Treated with 'other' ONLY outside 2015-2021: {len(ids_dropped_reason_A):,}")
+print(f"DROPPED B: Treated with 'other' BOTH inside & outside: {len(ids_dropped_reason_B):,}")
+print(f"DROPPED C: Never treated with ANY intervention: {len(ids_dropped_reason_C):,}")
+
+# Assert that every intersection has been categorized exactly once
+total_categorized_ids = len(ids_kept_other_interventions) + len(ids_kept_speed_limit_only) + \
+                        len(ids_dropped_reason_A) + len(ids_dropped_reason_B) + len(ids_dropped_reason_C)
+assert len(original_ids) == total_categorized_ids
+print("\n(Sanity Check Passed: All intersections are accounted for.)")
+
+
+# 3. CALCULATE ROW COUNTS (2013-2023) FOR EACH GROUP
+print("\nStep 3: Calculating row counts (from 2013-2023) for each category...")
+
+# Filter original data to the relevant analysis window first
+original_df_filtered = original_df[original_df['year'].between(2013, 2023)]
+
+# Calculate rows for each of the five groups
+rows_kept_A = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_kept_other_interventions)].shape[0]
+rows_kept_B = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_kept_speed_limit_only)].shape[0]
+rows_dropped_A = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_dropped_reason_A)].shape[0]
+rows_dropped_B = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_dropped_reason_B)].shape[0]
+rows_dropped_C = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_dropped_reason_C)].shape[0]
+
+# 4. FINAL RECONCILIATION
+print("\nStep 4: Performing final reconciliation of all rows...")
+
+original_filtered_row_count = original_df_filtered.shape[0]
+final_row_count = final_df.shape[0]
+
+print("\n--- Full Audit of All Rows (2013-2023) ---")
+print(f"Total Rows in Original Data (2013-2023): {original_filtered_row_count:,}")
+print("=" * 45)
+print(f"  Rows KEPT ('other_interventions'): {rows_kept_A:>12,}")
+print(f"  Rows KEPT ('speed_limit_only'): {rows_kept_B:>12,}")
+print("-" * 45)
+print(f"  Subtotal Kept Rows (Calculated): {rows_kept_A + rows_kept_B:>14,}")
+print(f"  Actual Rows in Final File: {final_row_count:>18,}")
+print("-" * 45)
+print(f"  Rows DROPPED (Reason A): {rows_dropped_A:>18,}")
+print(f"  Rows DROPPED (Reason B): {rows_dropped_B:>18,}")
+print(f"  Rows DROPPED (Reason C): {rows_dropped_C:>18,}")
+print("-" * 45)
+
+total_calculated_rows = rows_kept_A + rows_kept_B + rows_dropped_A + rows_dropped_B + rows_dropped_C
+print(f"  GRAND TOTAL (All Categories): {total_calculated_rows:>15,}")
+
+# The ultimate check
+try:
+    assert (rows_kept_A + rows_kept_B) == final_row_count
+    assert total_calculated_rows == original_filtered_row_count
+    print("\n✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅")
+    print("AUDIT COMPLETE AND 100% SUCCESSFUL!")
+    print("Every row from the 2013-2023 source data has been perfectly accounted for.")
+    print("✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅")
+except AssertionError:
+    print("\n❌❌❌ VALIDATION FAILED! ❌❌❌")
 
 # #### Speed Limit Analysis
 
