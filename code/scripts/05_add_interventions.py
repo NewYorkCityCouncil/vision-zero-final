@@ -109,7 +109,7 @@ intersection_intervention_table['leading_pedestrian_interval_post'] = intersecti
 intersection_intervention_table = intersection_intervention_table.drop(columns=['install_da']) # drop
 
 
-# In[8]:
+# In[14]:
 
 
 # looking at results
@@ -550,7 +550,7 @@ enhanced_crossings_gdf.drop(columns=['date_imple']).explore(m=n, color='red')
 
 # - Intersections impacted: Intersections connected to streets impacted by the intervention (only if traffic flows toward them)
 
-# In[35]:
+# In[5]:
 
 
 # uploading signal retiming data
@@ -558,7 +558,7 @@ enhanced_crossings_gdf.drop(columns=['date_imple']).explore(m=n, color='red')
 # signal_retiming_uploaded = pd.read_csv('../data/input/VZV_Signal Timing_25MPH Signal Retiming.geojson') # downloaded version
 signal_retiming_uploaded = pd.read_csv('https://data.cityofnewyork.us/resource/d8dp-wfee.csv?$limit=9999999') # code to pull directly from API
 
-# In[36]:
+# In[6]:
 
 
 # cleaning signal retiming dataset
@@ -571,7 +571,7 @@ signal_retiming_gdf = signal_retiming_gdf.to_crs(epsg=2263)
 # dropping duplicates
 signal_retiming_gdf = signal_retiming_gdf.sort_values('yr').drop_duplicates(subset=['the_geom'], keep='first')
 
-# In[37]:
+# In[7]:
 
 
 # with the spped limit dataset the segments were already separated for each street, for this dataset each geometry is a line covering multiple blocks
@@ -582,7 +582,7 @@ intersections = nyc_intersections_vz_trimmed_streets.set_geometry('intersection_
 streets = signal_retiming_gdf.set_geometry('the_geom')
 signal_retiming_gdf_trimmed_streets = gpd.overlay(streets, intersections, how='difference')
 
-# In[38]:
+# In[8]:
 
 
 # get midpoints of all the individual lines within a multilinestring
@@ -607,7 +607,7 @@ signal_retiming_gdf_trimmed_streets['midpoint'] = signal_retiming_gdf_trimmed_st
 # explode list of points
 signal_retiming_gdf_trimmed_streets = gpd.GeoDataFrame(signal_retiming_gdf_trimmed_streets.explode('midpoint'), geometry='midpoint', crs='epsg:2263')
 
-# In[39]:
+# In[9]:
 
 
 # merging with nyc streets
@@ -615,7 +615,7 @@ signal_retiming_gdf_trimmed_streets = gpd.GeoDataFrame(signal_retiming_gdf_trimm
 signal_retiming_merged_w_streets = signal_retiming_gdf_trimmed_streets.sjoin(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']].set_geometry('street_geom'), how = 'left').drop(columns=['index_right'])
 signal_retiming_merged_w_streets = signal_retiming_merged_w_streets.merge(nyc_intersections_vz_trimmed_streets[['street_geom','PhysicalID']], how = 'left')
 
-# In[40]:
+# In[10]:
 
 
 # some of the points were not matched to street buffers 
@@ -672,7 +672,7 @@ signal_retiming_merged_w_streets = signal_retiming_merged_w_streets[signal_retim
 # only keep first instance of a street receiving and intervention if it received more than one
 signal_retiming_merged_w_streets = signal_retiming_merged_w_streets.sort_values('yr').drop_duplicates(subset=['PhysicalID']) 
 
-# In[41]:
+# In[11]:
 
 
 # finding nodes impacted by the intervention
@@ -686,7 +686,7 @@ from_intervention_nodes_sr = nyc_intersections_vz_trimmed_streets[(nyc_intersect
 # list of all affected nodes
 sr_intervention_nodes = to_intervention_nodes_sr + from_intervention_nodes_sr
 
-# In[42]:
+# In[12]:
 
 
 # join with intersection dataset
@@ -711,7 +711,7 @@ intersection_intervention_table['signal_retiming_post'] = intersection_intervent
 intersection_intervention_table = intersection_intervention_table.drop(columns=['yr']) # drop
 
 
-# In[43]:
+# In[15]:
 
 
 # taking a look at one borough to check work 
@@ -727,7 +727,7 @@ bk = bk.set_geometry('intersection_geom')
 bk[bk['NODEID'].isin(sr_intervention_nodes)][['PhysicalID','NODEID', 'NodeIDFrom', 'NodeIDTo', 'TrafDir', 'intersection_id', 'intersection_geom']].drop_duplicates(subset=['intersection_geom']).explore(m=m, color='blue')
 
 
-# In[ ]:
+# In[16]:
 
 
 # --- New Analysis Code ---
@@ -790,7 +790,7 @@ ranked_intersections_gdf = ranked_intersections_gdf.sort_values(
 print("\n--- Top 20 Treated Intersections by Post-Intervention Pedestrian Injury Count ---")
 print(ranked_intersections_gdf[['on_street', 'total_post_treatment_injuries', 'intersection_id']].head(20).to_string())
 
-# In[ ]:
+# In[17]:
 
 
 # --- Visualization Code ---
@@ -860,6 +860,68 @@ if not critical_hotspots_gdf.empty:
 import folium
 folium.LayerControl().add_to(m)
 m
+
+# In[19]:
+
+
+# --- Visualization of Top 20 Ranked Intersections ---
+
+print("Generating a map of the top 20 most dangerous intersections with ranking...")
+
+# --- STEP 1: ISOLATE THE TOP 20 AND CALCULATE RANK ---
+
+# The `ranked_intersections_gdf` is already sorted. Isolate the top 20.
+top_20_intersections_gdf = ranked_intersections_gdf.head(20).copy()
+
+# Add a 'rank' column.
+# We use method='min' to handle ties: if two intersections are tied for 3rd place,
+# both will be ranked '3', and the next intersection will be ranked '5'.
+# 'ascending=False' ensures that the highest injury count gets rank 1.
+top_20_intersections_gdf['rank'] = top_20_intersections_gdf['total_post_treatment_injuries'].rank(
+    method='min', 
+    ascending=False
+).astype(int)
+
+print(f"Isolated the top {len(top_20_intersections_gdf)} intersections and assigned ranks.")
+# Optional: Display the ranked data to verify
+# print(top_20_intersections_gdf[['rank', 'on_street', 'total_post_treatment_injuries']].to_string())
+
+
+# --- STEP 2: BUILD THE MAP IN LAYERS ---
+
+# Layer 1: Start with the same clean, grayscale basemap
+m_top20_ranked = signal_retiming_gdf.explore(
+    tiles="CartoDB positron",
+    color="rgba(0,0,0,0)", # Invisible placeholder
+    name="Placeholder"
+)
+
+# Layer 2: Add ALL the treated street corridors for context
+signal_retiming_gdf.explore(
+    m=m_top20_ranked,
+    color="skyblue",
+    style_kwds={'weight': 1.5, 'opacity': 0.5}, # Fainter context lines
+    name="All Treated Street Corridors"
+)
+
+# Layer 3: Plot the Top 20 hotspots, now with rank information
+if not top_20_intersections_gdf.empty:
+    top_20_intersections_gdf.explore(
+        m=m_top20_ranked,
+        color='purple', # A different color to distinguish this map
+        # Prominent styling to make them stand out
+        marker_kwds={'radius': 800, 'stroke': True, 'weight': 2, 'color': 'black'},
+        # Add 'rank' to the tooltip and popup for on-hover and on-click info
+        tooltip=['rank', 'on_street', 'total_post_treatment_injuries'],
+        popup=['rank', 'on_street', 'total_post_treatment_injuries'],
+        name="Top 20 Ranked Dangerous Intersections"
+    )
+
+import folium
+folium.LayerControl().add_to(m_top20_ranked)
+
+# In a Jupyter environment, this line will display the map
+m_top20_ranked
 
 # #### Speed Humps
 
