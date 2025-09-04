@@ -1,0 +1,495 @@
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(glmmTMB)
+library(DHARMa)
+library(effects)
+library(performance)
+library(purrr)
+library(furrr)
+library(splines)
+library(future.apply)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(plotly) 
+library(ggeffects)
+```
+
+# Uploading and Preparing the Data
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2013-2023.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+# Picking a Model Type
+
+```{r}
+# fit a Poisson regression model 
+# pedestrians
+
+poisson_model <- glm(
+  pedestrian_death_or_injury ~ 
+    leading_pedestrian_interval_post + 
+    turn_traffic_calming_post + 
+    enhanced_crossing_post + 
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 +
+    scaled_summonses + 
+    scaled_traffic_volume +
+    scaled_pop_density +
+    scaled_time +
+    (1 | intersection_id),
+  family = "poisson", 
+  data = sites_ever_treated 
+)
+
+# calculate dispersion statistic
+# dispersion stat over 1.5 indicates needs for negative binomial
+dispersion_stat <- sum(residuals(poisson_model, type = "pearson")^2) / poisson_model$df.residual
+print(paste("Dispersion statistic:", dispersion_stat))
+```
+
+## First Model Attempt
+
+```{r}
+# pedestrians
+# negative binomial regression (dispersion stat: 1.72)
+# sites ever treated from 2013 through 2023
+# looking at data from 2013 through 2023
+
+model_orig <- glmmTMB(
+  pedestrian_death_or_injury ~
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 +
+    scaled_summonses +
+    scaled_traffic_volume + 
+    scaled_pop_density +
+    scaled_time +
+    (1 | intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+)
+
+summary(model_orig)
+```
+
+```{r}
+# diagnostics
+
+# tests find zero-inflation, underdispersion, non-normal residuals, and outliers
+
+sim_res_orig <- simulateResiduals(fittedModel = model_orig, n = 500, plot = TRUE)
+testZeroInflation(sim_res_orig) # zero-inflation test
+testDispersion(sim_res_orig) # dispersion test
+testUniformity(sim_res_orig) # KS test
+testOutliers(sim_res_orig) # outliers
+```
+
+# Fine-Tuning the Model
+
+Will consider:
+- Nested Random Effect
+- Splines
+- Dispersion Formula
+
+## Nested Random Effect
+
+A nested random effect for intersection/ NTA/ borough allows the baseline to vary by intersection, NTA, and borough.
+
+It captures:
+- Variation between regions (e.g. two boroughs), and
+- Additional variation between sub-regions within the same larger region (e.g. two intersections within the same NTA).
+
+This structure accounts for more granular clustering, recognizing that, for example: 
+- Observations from the same intersection are more similar to each other than to other intersections in the same NTA.
+- NTAs differ from one another, but there's also important within-NTA variation at the intersection level.
+- Same applies to boroughs and NTAs, etc
+
+```{r}
+# experimenting with random effects 
+
+# NTA and intersection nested 
+model_nta_RE <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    scaled_pop_density +        
+    scaled_time +       
+    (1 | ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+# borough, NTA, and intersection nested 
+model_boro_RE <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    scaled_pop_density +
+    scaled_time +       
+    (1|boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+anova(model_orig, model_nta_RE, model_boro_RE)
+```
+
+### model_boro_RE has best AIC and fixes zero-inflation and dispersion
+### KS test (non-normal residuals) and outliers remain a problem for both models
+
+```{r}
+# diagnostics
+
+sim_res_nta_RE <- simulateResiduals(fittedModel = model_nta_RE, n = 500, plot = TRUE)
+testZeroInflation(sim_res_nta_RE) # zero-inflation test
+testDispersion(sim_res_nta_RE) # dispersion test
+testUniformity(sim_res_nta_RE) # KS test
+testOutliers(sim_res_nta_RE) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_nta_RE), residuals(model_nta_RE, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+```{r}
+# model 2
+sim_res_boro_RE <- simulateResiduals(fittedModel = model_boro_RE, n = 500, plot = TRUE)
+testZeroInflation(sim_res_boro_RE) # zero-inflation test
+testDispersion(sim_res_boro_RE) # dispersion test
+testUniformity(sim_res_boro_RE) # KS test
+testOutliers(sim_res_boro_RE) # outliers
+```
+
+```{r}
+# plotting residuals for model
+# exhibits hetereoskedasticity
+
+plot(fitted(model_boro_RE), residuals(model_boro_RE, type = "pearson"),
+     xlab = "Fitted Values", ylab = "Pearson Residuals",
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+```
+
+## Splines
+
+Splines allow for more flexible modeling of non-linear patterns in continuous control variables
+
+```{r}
+# check for non-linear patterns in continuous controls
+# scaled_pop_density looks the least linear
+
+ggplot(intervention_df, aes(x = scaled_summonses, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Traffic Summonses",
+    x = "Scaled Traffic Summonses",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+
+ggplot(intervention_df, aes(x = scaled_traffic_volume, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Traffic Volume",
+    x = "Scaled Traffic Volume",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+
+ggplot(intervention_df, aes(x = scaled_pop_density, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Population Density",
+    x = "Scaled Population Density",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+
+ggplot(intervention_df, aes(x = scaled_time, y = pedestrian_death_or_injury)) +
+  geom_point(alpha = 0.05, shape = 16) + 
+  labs(
+    title = "Pedestrian Deaths/Injuries vs. Scaled Time",
+    x = "Scaled Time",
+    y = "Pedestrian Deaths/Injuries"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# updating model with spline
+
+# one spline for scaled_pop_density
+model_spline <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+anova(model_boro_RE, model_spline)
+
+summary(model_spline)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Get the confidence intervals for the log-coefficients
+ci_log <- confint(model_spline, parm = "beta_", method = "wald") # Wald is fastest
+
+# Get the coefficients table from the summary
+summary_table <- summary(model_spline)$coefficients$cond
+
+# Combine the log-estimates and log-CIs
+log_results <- cbind(summary_table, ci_log)
+
+# Exponentiate everything to get IRRs and their CIs
+irr_results <- exp(log_results)
+
+# Print the final table
+print(irr_results)
+```
+
+```{r}
+# visualizing results
+
+# extract fixed effect estimates and standard errors 
+coef_point_estimates <- fixef(model_spline)$cond
+model_vcov <- vcov(model_spline)$cond
+model_se <- sqrt(diag(model_vcov))
+
+# compute z-scores and two-tailed p-values
+z_scores <- coef_point_estimates / model_se
+p_values_model <- 2 * (1 - pnorm(abs(z_scores)))
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  "scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", # can't be interpreted in the same way as the other coefficients
+  # "ns(scaled_pop_density, df = 2)2",
+  "scaled_traffic_volume",
+  "scaled_summonses",
+  "covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# add significance indicator
+percent_change_df <- percent_change_df %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant")
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% Bootstrap CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Point estimates from model_dispformula; cluster-robust bootstrap SEs and CIs",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
