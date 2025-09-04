@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely import wkt
 import numpy as np 
 
-# In[3]:
+# In[17]:
 
 
 # upload
@@ -19,7 +19,7 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 
 # #### Preparing Data For Analysis
 
-# In[4]:
+# In[18]:
 
 
 # creating version that only includes ever-treated intersections
@@ -30,7 +30,7 @@ treated_intersection_ids = intersection_intervention_table.loc[(intersection_int
 intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
 
 
-# In[5]:
+# In[19]:
 
 
 # find when each intervention was first introduced to each intersection
@@ -152,7 +152,7 @@ obs_count_table.to_csv('../data/output/observations-by-intervention-type_2015-20
 
 obs_count_table
 
-# In[10]:
+# In[20]:
 
 
 # new dataset with all intersections ever treated between 2015 and 2022, and source column
@@ -205,17 +205,24 @@ print(f"Total rows in final dataframe: {len(final_analytic_df):,}")
 print("\nBreakdown of total row counts by 'source':")
 print(final_analytic_df['source'].value_counts())
 
-# In[11]:
+# In[21]:
 
 
-# --- THE COMPLETE UNIVERSE AUDIT SCRIPT ---
+import pandas as pd
+import numpy as np
 
-print("--- Starting Full Audit of All Kept and Dropped Rows ---")
+# --- 1. LOAD DATA AND DEFINE CONSTANTS ---
 
-# 1. LOAD DATA AND DEFINE CONSTANTS
+print("--- Starting CORRECTED Full Audit of '...with_speed_limit_only...' Dataset ---")
 print("\nStep 1: Loading dataframes and defining constants...")
-original_df = pd.read_csv('../data/output/intersection_intervention_table_final.csv', low_memory=False)
-final_df = pd.read_csv('../data/output/intersection_intervention_table_with_speed_limit_only_2015-2022.csv')
+
+try:
+    original_df = pd.read_csv('../data/output/intersection_intervention_table_final.csv', low_memory=False)
+    final_df = pd.read_csv('../data/output/intersection_intervention_table_with_speed_limit_only_2015-2022.csv')
+except FileNotFoundError as e:
+    print(f"\n❌ ERROR: Could not find a required file. Please check the path and filename.")
+    print(f"Details: {e}")
+    exit()
 
 other_interventions = [
     'leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'slow_zones_post', 
@@ -224,69 +231,98 @@ other_interventions = [
 ]
 all_interventions = other_interventions + ['speed_limit_post']
 
-# 2. PARTITION ALL INTERSECTIONS INTO FIVE MUTUALLY EXCLUSIVE GROUPS
-print("\nStep 2: Partitioning every intersection into one of five final categories...")
 
-# --- Group 1 & 2: The Intersections that were KEPT ---
+# --- 2. PARTITION ALL INTERSECTIONS USING CORRECTED, R-ALIGNED LOGIC ---
+
+print("\nStep 2: Partitioning every intersection using the corrected, R-aligned logic...")
+
+# --- Get Ground Truth from the final file ---
 ids_kept_other_interventions = set(final_df[final_df['source'] == 'other_interventions']['intersection_id'])
 ids_kept_speed_limit_only = set(final_df[final_df['source'] == 'speed_limit_only']['intersection_id'])
+final_ids = ids_kept_other_interventions.union(ids_kept_speed_limit_only)
 
-# --- Group 3, 4, & 5: The Intersections that were DROPPED ---
 original_ids = set(original_df['intersection_id'].unique())
-final_ids = set(final_df['intersection_id'].unique())
 dropped_ids = original_ids - final_ids
 
-# Dropped Reason C: Never treated with ANY intervention at all.
+# --- Sub-Partition the DROPPED Intersections ---
+# Dropped Reason C: Never treated with ANY intervention at all. (Universal definition)
 ever_treated_ids = set(original_df.loc[(original_df[all_interventions] == 1).any(axis=1), 'intersection_id'])
 ids_dropped_reason_C = original_ids - ever_treated_ids
 
-# Dropped Reasons A & B: Treated with 'other' but failed the "clean history" rule.
-remaining_dropped_ids = dropped_ids - ids_dropped_reason_C
-ids_treated_in_window = set(original_df[
-    (original_df['year'].between(2015, 2021)) & ((original_df[other_interventions] == 1).any(axis=1))
-]['intersection_id'])
+# The remaining dropped IDs are those with 'other' treatments who failed the "clean history" rule.
+messy_history_dropped_ids = dropped_ids - ids_dropped_reason_C
 
-ids_dropped_reason_A = {id for id in remaining_dropped_ids if id not in ids_treated_in_window}
-ids_dropped_reason_B = {id for id in remaining_dropped_ids if id in ids_treated_in_window}
+# #######################################################################################
+# # BEGINNING OF THE CORRECTED CODE BLOCK
+# # This section replaces the previous faulty A/B split logic.
+# #######################################################################################
+
+# First, get the start year for every single intervention instance
+df_long = original_df.melt(
+    id_vars=['intersection_id', 'year'],
+    value_vars=other_interventions,
+    var_name='intervention_type',
+    value_name='is_active'
+)
+intervention_start_dates = df_long[df_long['is_active'] == 1].groupby(
+    ['intersection_id', 'intervention_type']
+)['year'].min().reset_index().rename(columns={'year': 'start_year'})
+
+# Next, for each intersection, create the two boolean flags, just like in R
+cohort_flags = intervention_start_dates.groupby('intersection_id')['start_year'].agg([
+    ('treated_inside_window', lambda s: s.between(2015, 2021).any()),
+    ('treated_outside_window', lambda s: (~s.between(2015, 2021)).any())
+]).reset_index()
+
+# Filter these flags to only the intersections that were actually DROPPED for a messy history
+dropped_cohort_flags = cohort_flags[cohort_flags['intersection_id'].isin(messy_history_dropped_ids)]
+
+# Now, use boolean masks to create the final ID sets for the dropped reasons A & B
+outside_only_mask = (~dropped_cohort_flags['treated_inside_window']) & (dropped_cohort_flags['treated_outside_window'])
+ids_dropped_reason_A = set(dropped_cohort_flags[outside_only_mask]['intersection_id'])
+
+mixed_mask = (dropped_cohort_flags['treated_inside_window']) & (dropped_cohort_flags['treated_outside_window'])
+ids_dropped_reason_B = set(dropped_cohort_flags[mixed_mask]['intersection_id'])
+
+# #######################################################################################
+# # END OF THE CORRECTED CODE BLOCK
+# #######################################################################################
+
 
 # --- Report on the partitioning of INTERSECTIONS ---
-print("\n--- Breakdown of ALL Intersections by Final Category ---")
+print("\n--- Breakdown of ALL Intersections by Final Category (Corrected Logic) ---")
 print(f"Total Intersections in Universe: {len(original_ids):,}")
-print("-" * 55)
+print("-" * 65)
 print(f"  KEPT: 'other_interventions' (clean history): {len(ids_kept_other_interventions):,}")
-print(f"  KEPT: 'speed_limit_only' (correctly defined): {len(ids_kept_speed_limit_only):,}")
+print(f"  KEPT: 'speed_limit_only' cohort (impure): {len(ids_kept_speed_limit_only):,}")
 print(f"DROPPED A: Treated with 'other' ONLY outside 2015-2021: {len(ids_dropped_reason_A):,}")
 print(f"DROPPED B: Treated with 'other' BOTH inside & outside: {len(ids_dropped_reason_B):,}")
 print(f"DROPPED C: Never treated with ANY intervention: {len(ids_dropped_reason_C):,}")
 
-# Assert that every intersection has been categorized exactly once
 total_categorized_ids = len(ids_kept_other_interventions) + len(ids_kept_speed_limit_only) + \
                         len(ids_dropped_reason_A) + len(ids_dropped_reason_B) + len(ids_dropped_reason_C)
 assert len(original_ids) == total_categorized_ids
 print("\n(Sanity Check Passed: All intersections are accounted for.)")
 
 
-# 3. CALCULATE ROW COUNTS (2013-2023) FOR EACH GROUP
+# --- 3. CALCULATE AND RECONCILE ROW COUNTS ---
 print("\nStep 3: Calculating row counts (from 2013-2023) for each category...")
 
-# Filter original data to the relevant analysis window first
 original_df_filtered = original_df[original_df['year'].between(2013, 2023)]
+final_row_count = final_df.shape[0]
 
-# Calculate rows for each of the five groups
 rows_kept_A = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_kept_other_interventions)].shape[0]
 rows_kept_B = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_kept_speed_limit_only)].shape[0]
 rows_dropped_A = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_dropped_reason_A)].shape[0]
 rows_dropped_B = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_dropped_reason_B)].shape[0]
 rows_dropped_C = original_df_filtered[original_df_filtered['intersection_id'].isin(ids_dropped_reason_C)].shape[0]
 
-# 4. FINAL RECONCILIATION
+
+# --- 4. FINAL RECONCILIATION ---
 print("\nStep 4: Performing final reconciliation of all rows...")
 
-original_filtered_row_count = original_df_filtered.shape[0]
-final_row_count = final_df.shape[0]
-
 print("\n--- Full Audit of All Rows (2013-2023) ---")
-print(f"Total Rows in Original Data (2013-2023): {original_filtered_row_count:,}")
+print(f"Total Rows in Original Data (2013-2023): {original_df_filtered.shape[0]:,}")
 print("=" * 45)
 print(f"  Rows KEPT ('other_interventions'): {rows_kept_A:>12,}")
 print(f"  Rows KEPT ('speed_limit_only'): {rows_kept_B:>12,}")
@@ -298,20 +334,18 @@ print(f"  Rows DROPPED (Reason A): {rows_dropped_A:>18,}")
 print(f"  Rows DROPPED (Reason B): {rows_dropped_B:>18,}")
 print(f"  Rows DROPPED (Reason C): {rows_dropped_C:>18,}")
 print("-" * 45)
-
 total_calculated_rows = rows_kept_A + rows_kept_B + rows_dropped_A + rows_dropped_B + rows_dropped_C
 print(f"  GRAND TOTAL (All Categories): {total_calculated_rows:>15,}")
 
-# The ultimate check
 try:
     assert (rows_kept_A + rows_kept_B) == final_row_count
-    assert total_calculated_rows == original_filtered_row_count
+    assert total_calculated_rows == original_df_filtered.shape[0]
     print("\n✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅")
-    print("AUDIT COMPLETE AND 100% SUCCESSFUL!")
-    print("Every row from the 2013-2023 source data has been perfectly accounted for.")
+    print("CORRECTED AUDIT COMPLETE AND 100% SUCCESSFUL!")
+    print("Every row has been perfectly accounted for using the corrected logic.")
     print("✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅")
 except AssertionError:
-    print("\n❌❌❌ VALIDATION FAILED! ❌❌❌")
+    print("\n❌❌❌ VALIDATION FAILED! The row counts do not reconcile. ❌❌❌")
 
 # In[6]:
 
@@ -335,7 +369,7 @@ intersection_pre_post_dataset_even_more_years = intersections_inside_treatment_w
 
 intersection_pre_post_dataset_even_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2013-2023.csv', index=False)
 
-# In[12]:
+# In[16]:
 
 
 import pandas as pd
@@ -343,7 +377,7 @@ import numpy as np
 
 # --- 1. SETUP: LOAD DATA AND DEFINE CONSTANTS ---
 
-print("--- Starting ALIGNED Full Audit of the 'Ever Treated 2013-2023' Dataset ---")
+print("--- Starting FINAL CORRECTED Full Audit of the 'Ever Treated 2013-2023' Dataset ---")
 print("\nStep 1: Loading dataframes and defining constants...")
 
 try:
@@ -362,15 +396,15 @@ other_interventions = [
 all_interventions = other_interventions + ['speed_limit_post']
 
 
-# --- 2. PARTITION ALL INTERSECTIONS USING THE LOGIC FROM THE FIRST SCRIPT ---
+# --- 2. PARTITION ALL INTERSECTIONS USING CORRECTED, R-ALIGNED LOGIC ---
 
-print("\nStep 2: Partitioning every intersection using the original script's logic...")
+print("\nStep 2: Partitioning every intersection using the correct, R-aligned logic...")
 
 original_ids = set(original_df['intersection_id'].unique())
 kept_ids = set(final_df['intersection_id'].unique())
 dropped_ids = original_ids - kept_ids
 
-# --- Sub-Partition the DROPPED Intersections ---
+# --- Sub-Partition the DROPPED Intersections (This part remains the same) ---
 ever_treated_ids = set(original_df.loc[(original_df[all_interventions] == 1).any(axis=1), 'intersection_id'])
 ids_dropped_never_treated = original_ids - ever_treated_ids
 
@@ -380,30 +414,50 @@ ids_dropped_speed_limit_only = ids_with_speed_limit - all_ids_with_other_interve
 
 ids_dropped_contaminated = dropped_ids - ids_dropped_never_treated - ids_dropped_speed_limit_only
 
-# --- Sub-Partition the KEPT Intersections (using the A/B logic from Script 1) ---
-ids_treated_in_window = set(original_df[
-    (original_df['year'].between(2015, 2021)) & ((original_df[other_interventions] == 1).any(axis=1))
-]['intersection_id'])
+# #######################################################################################
+# # BEGINNING OF THE CORRECTED CODE BLOCK
+# # This entire section replaces the previous faulty logic.
+# #######################################################################################
 
-# Kept Category 1: "Clean History" from the first dataset's perspective.
-# THIS IS THE CORRECTED SECTION
+# --- Sub-Partition the KEPT Intersections (using direct R logic translation) ---
+
+# First, get the start year for every single intervention instance
 df_long = original_df.melt(
-    id_vars=['intersection_id', 'year'], # CORRECTED: 'year' is now included
-    value_vars=other_interventions, 
-    var_name='intervention_type', 
+    id_vars=['intersection_id', 'year'],
+    value_vars=other_interventions,
+    var_name='intervention_type',
     value_name='is_active'
 )
-intervention_start_dates = df_long[df_long['is_active'] == 1].groupby(['intersection_id', 'intervention_type'])['year'].min().reset_index().rename(columns={'year': 'start_year'})
-ids_to_remove_due_to_outside_treatment = set(intervention_start_dates[~intervention_start_dates['start_year'].between(2015, 2021)]['intersection_id'])
-ids_kept_clean_2015_2021 = all_ids_with_other_interventions - ids_to_remove_due_to_outside_treatment
+intervention_start_dates = df_long[df_long['is_active'] == 1].groupby(
+    ['intersection_id', 'intervention_type']
+)['year'].min().reset_index().rename(columns={'year': 'start_year'})
 
-remaining_kept_ids = kept_ids - ids_kept_clean_2015_2021
+# Next, for each intersection, create the two boolean flags, just like in R
+cohort_flags = intervention_start_dates.groupby('intersection_id')['start_year'].agg([
+    ('treated_inside_window', lambda s: s.between(2015, 2021).any()),
+    ('treated_outside_window', lambda s: (~s.between(2015, 2021)).any())
+]).reset_index()
 
-ids_kept_mixed_history = {id for id in remaining_kept_ids if id in ids_treated_in_window}
-ids_kept_clean_outside = {id for id in remaining_kept_ids if id not in ids_treated_in_window}
+# Filter these flags to only the intersections that were actually KEPT in the final dataset
+kept_cohort_flags = cohort_flags[cohort_flags['intersection_id'].isin(kept_ids)]
+
+# Now, use boolean masks to create the final ID sets, mimicking the R 'case_when'
+middle_only_mask = (kept_cohort_flags['treated_inside_window']) & (~kept_cohort_flags['treated_outside_window'])
+ids_kept_clean_2015_2021 = set(kept_cohort_flags[middle_only_mask]['intersection_id'])
+
+outside_only_mask = (~kept_cohort_flags['treated_inside_window']) & (kept_cohort_flags['treated_outside_window'])
+ids_kept_clean_outside = set(kept_cohort_flags[outside_only_mask]['intersection_id'])
+
+mixed_mask = (kept_cohort_flags['treated_inside_window']) & (kept_cohort_flags['treated_outside_window'])
+ids_kept_mixed_history = set(kept_cohort_flags[mixed_mask]['intersection_id'])
+
+# #######################################################################################
+# # END OF THE CORRECTED CODE BLOCK
+# #######################################################################################
+
 
 # --- Report on the partitioning of INTERSECTIONS ---
-print("\n--- Breakdown of ALL Intersections by Final Category (Aligned Logic) ---")
+print("\n--- Breakdown of ALL Intersections by Final Category (Corrected Logic) ---")
 print(f"Total Intersections in Universe: {len(original_ids):,}")
 print("-" * 75)
 print("KEPT INTERSECTIONS (in this dataset):")
@@ -419,6 +473,7 @@ total_categorized_ids = len(ids_kept_clean_2015_2021) + len(ids_kept_mixed_histo
                         len(ids_dropped_contaminated) + len(ids_dropped_speed_limit_only) + len(ids_dropped_never_treated)
 assert len(original_ids) == total_categorized_ids
 print("\n(Sanity Check Passed: All intersections are accounted for.)")
+
 
 # --- 3. CALCULATE AND RECONCILE ROW COUNTS (2013-2023) ---
 print("\nStep 3: Calculating and reconciling row counts (from 2013-2023)...")
@@ -454,8 +509,8 @@ try:
     assert (rows_kept_A + rows_kept_B + rows_kept_C) == final_row_count
     assert total_calculated_rows == original_df_filtered.shape[0]
     print("\n✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅")
-    print("ALIGNED AUDIT COMPLETE AND 100% SUCCESSFUL!")
-    print("Every row has been perfectly accounted for using the aligned logic.")
+    print("CORRECTED AUDIT COMPLETE AND 100% SUCCESSFUL!")
+    print("Every row has been perfectly accounted for using the R-aligned logic.")
     print("✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅")
 except AssertionError:
     print("\n❌❌❌ VALIDATION FAILED! The row counts do not reconcile. ❌❌❌")
