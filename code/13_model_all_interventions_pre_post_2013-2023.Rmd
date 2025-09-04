@@ -47,6 +47,77 @@ sites_ever_treated <- sites_ever_treated %>%
   )
 ```
 
+```{r}
+# Define the 8 core intervention columns
+intervention_cols <- c(
+  'leading_pedestrian_interval_post', 'turn_traffic_calming_post', 
+  'enhanced_crossing_post', 'speed_humps_post', 
+  'street_improvement_project_post', 'street_improvement_corridors_post',
+  'signal_retiming_post', 'slow_zones_post'
+)
+
+# Step 1: Find the start year for each unique intervention at each intersection.
+# This creates a long-format table of every treatment start event.
+intervention_start_years <- sites_ever_treated %>%
+  select(intersection_id, year, all_of(intervention_cols)) %>%
+  pivot_longer(
+    cols = all_of(intervention_cols),
+    names_to = "intervention_type",
+    values_to = "is_active"
+  ) %>%
+  filter(is_active == 1) %>%
+  group_by(intersection_id, intervention_type) %>%
+  summarise(start_year = min(year), .groups = 'drop')
+
+# Step 2: For each intersection, check if it has treatments inside vs. outside the 2015-2021 window.
+# This summary is the key to aligning with your strict definition.
+intersection_cohorts <- intervention_start_years %>%
+  group_by(intersection_id) %>%
+  summarise(
+    # Does this intersection have ANY treatment that started between 2015-2021?
+    treated_inside_window = any(start_year %in% 2015:2021),
+    # Does this intersection have ANY treatment that started before 2015 or after 2021?
+    treated_outside_window = any(start_year < 2015 | start_year > 2021)
+  ) %>%
+  mutate(
+    # Use case_when to create the final, mutually exclusive cohort labels
+    cohort = case_when(
+      # If it has treatments INSIDE but NOT outside, it's "Middle Only"
+      treated_inside_window & !treated_outside_window ~ "Middle Only (2015-2021)",
+      
+      # If it has treatments OUTSIDE but NOT inside, it's "Outside Only"
+      !treated_inside_window & treated_outside_window ~ "Outside Only (2013-14 & 2022-23)",
+      
+      # If it has treatments in BOTH periods, it's "Mixed History"
+      treated_inside_window & treated_outside_window  ~ "Mixed History",
+      
+      # Fallback for unexpected cases
+      TRUE ~ "Error: Uncategorized"
+    )
+  )
+
+# Step 3: Create the final summary table
+cohort_summary_table <- intersection_cohorts %>%
+  count(cohort, name = "num_intersections") %>%
+  mutate(
+    percentage = (num_intersections / sum(num_intersections)) * 100
+  ) %>%
+  arrange(desc(num_intersections))
+
+# Final check: The total should be 21,142
+total_intersections_in_r <- sum(cohort_summary_table$num_intersections)
+print(paste("Total unique intersections categorized in R:", total_intersections_in_r))
+
+
+# Step 4: Display the table nicely. The numbers should now match your Python audit.
+knitr::kable(
+  cohort_summary_table,
+  caption = "Intersection Cohorts Based on Treatment Timing (Aligned with Python Validation)",
+  col.names = c("Treatment Cohort", "Number of Intersections", "Percentage (%)"),
+  digits = c(0, 0, 1)
+)
+```
+
 # Picking a Model Type
 
 ```{r}
