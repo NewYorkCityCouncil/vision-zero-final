@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 import pandas as pd
@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely import wkt
 import numpy as np 
 
-# In[17]:
+# In[2]:
 
 
 # upload
@@ -19,7 +19,7 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 
 # #### Preparing Data For Analysis
 
-# In[18]:
+# In[3]:
 
 
 # creating version that only includes ever-treated intersections
@@ -30,7 +30,7 @@ treated_intersection_ids = intersection_intervention_table.loc[(intersection_int
 intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
 
 
-# In[19]:
+# In[4]:
 
 
 # find when each intervention was first introduced to each intersection
@@ -347,7 +347,7 @@ try:
 except AssertionError:
     print("\n❌❌❌ VALIDATION FAILED! The row counts do not reconcile. ❌❌❌")
 
-# In[6]:
+# In[5]:
 
 
 # using wider range of dates (2013-2023)
@@ -362,14 +362,143 @@ intersections_inside_treatment_window = intersection_intervention_table_ever_tre
 # limiting to just 2013-2023
 intersection_pre_post_dataset_even_more_years = intersections_inside_treatment_window[(intersections_inside_treatment_window['year'] >= 2013) & (intersections_inside_treatment_window['year'] <= 2023)]
 
-# In[7]:
+# In[6]:
+
+
+# Ensure the DataFrame is a copy to prevent SettingWithCopyWarning
+intersection_pre_post_dataset_even_more_years = intersection_pre_post_dataset_even_more_years.copy()
+
+print("--- Adding 'early' and 'late' adopter flags ---")
+
+# --- Step 1: Identify the set of intersection IDs for each flag ---
+
+# For 'early': Find all unique intersection IDs that had ANY treatment start in 2013 or 2014.
+early_ids = set(
+    intervention_start_dates[
+        intervention_start_dates['year'].isin([2013, 2014])
+    ]['intersection_id'].unique()
+)
+
+# For 'late': First, find the single FIRST-EVER treatment year for each intersection.
+first_ever_treatment_year = intervention_start_dates.groupby('intersection_id')['year'].min()
+
+# Now, identify the intersection IDs where this first-ever year was 2022 or 2023.
+late_ids = set(
+    first_ever_treatment_year[
+        first_ever_treatment_year.isin([2022, 2023])
+    ].index
+)
+
+# --- Step 2: Create the new columns using the efficient .isin() method ---
+# This checks if each row's intersection_id is in our pre-calculated sets.
+# .astype(int) cleanly converts the boolean result (True/False) to binary (1/0).
+
+intersection_pre_post_dataset_even_more_years['early'] = intersection_pre_post_dataset_even_more_years['intersection_id'].isin(early_ids).astype(int)
+intersection_pre_post_dataset_even_more_years['late'] = intersection_pre_post_dataset_even_more_years['intersection_id'].isin(late_ids).astype(int)
+
+
+# --- Step 3 (Optional but Recommended): Validate the results ---
+
+print("\n--- Validation ---")
+num_early_intersections = len(early_ids)
+num_late_intersections = len(late_ids)
+
+print(f"Identified {num_early_intersections:,} unique intersections for the 'early' flag.")
+print(f"Identified {num_late_intersections:,} unique intersections for the 'late' flag.")
+
+print("\nValue counts for the 'early' flag in the final dataframe:")
+# Multiplying by 11 years (2013-2023) should approximate the row count
+print(intersection_pre_post_dataset_even_more_years['early'].value_counts()) 
+
+print("\nValue counts for the 'late' flag in the final dataframe:")
+print(intersection_pre_post_dataset_even_more_years['late'].value_counts())
+
+print("\nFirst 5 rows of the dataframe with new columns:")
+print(intersection_pre_post_dataset_even_more_years[['intersection_id', 'year', 'early', 'late']].head())
+
+# To see a random sample of 10 rows where 'late' is 1:
+# print("\nSample of 'late' adopter rows:")
+# print(intersection_pre_post_dataset_even_more_years[intersection_pre_post_dataset_even_more_years['late'] == 1].sample(10)[['intersection_id', 'year', 'early', 'late']])
+
+# In[ ]:
+
+
+print("\n--- Performing rigorous validation on 'early' and 'late' flags ---")
+
+# --- Step 1: Create a "clean" history table for validation ---
+# Get the set of intersection IDs that are ACTUALLY in the final dataset.
+final_ids = set(intersection_pre_post_dataset_even_more_years['intersection_id'].unique())
+
+# Filter the master start date list to only include these final intersections.
+# All our checks will be against this clean history.
+clean_intervention_start_dates = intervention_start_dates[
+    intervention_start_dates['intersection_id'].isin(final_ids)
+]
+
+# --- Step 2: Validation for the 'early' flag ---
+print("\nValidating 'early' flag...")
+
+# Ground Truth: From the clean history, which IDs SHOULD be flagged as early?
+ground_truth_early_ids = set(
+    clean_intervention_start_dates[
+        clean_intervention_start_dates['year'].isin([2013, 2014])
+    ]['intersection_id'].unique()
+)
+
+# Test Set: Which IDs were ACTUALLY flagged as early in the dataframe?
+flagged_early_ids = set(
+    intersection_pre_post_dataset_even_more_years[
+        intersection_pre_post_dataset_even_more_years['early'] == 1
+    ]['intersection_id'].unique()
+)
+
+# The Check: Compare the sets.
+if ground_truth_early_ids == flagged_early_ids:
+    print("✅ Validation PASSED for 'early' flag.")
+else:
+    print("❌ VALIDATION FAILED for 'early' flag!")
+    mismatch = ground_truth_early_ids.symmetric_difference(flagged_early_ids)
+    print(f"   Found {len(mismatch)} mismatched intersection(s).")
+    print(f"   Example mismatched ID: {list(mismatch)[0]}")
+
+
+# --- Step 3: Validation for the 'late' flag ---
+print("\nValidating 'late' flag...")
+
+# Test Set: Which IDs were ACTUALLY flagged as late in the dataframe?
+flagged_late_ids = set(
+    intersection_pre_post_dataset_even_more_years[
+        intersection_pre_post_dataset_even_more_years['late'] == 1
+    ]['intersection_id'].unique()
+)
+
+# The Check: For this flagged group, did any of them have a treatment starting BEFORE 2022?
+late_intersections_history = clean_intervention_start_dates[
+    clean_intervention_start_dates['intersection_id'].isin(flagged_late_ids)
+]
+
+# Find the first-ever treatment year for each of these intersections.
+first_treatment_for_late_group = late_intersections_history.groupby('intersection_id')['year'].min()
+
+# Find any intersections that violate the rule (first treatment < 2022).
+violators = first_treatment_for_late_group[first_treatment_for_late_group < 2022]
+
+if violators.empty:
+    print("✅ Validation PASSED for 'late' flag: All flagged intersections have no treatments starting before 2022.")
+else:
+    print("❌ VALIDATION FAILED for 'late' flag!")
+    print(f"   Found {len(violators)} intersection(s) flagged as 'late' that had treatments before 2022.")
+    print(f"   Example violating ID and its first treatment year:")
+    print(violators.head(1))
+
+# In[10]:
 
 
 # download
 
 intersection_pre_post_dataset_even_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2013-2023.csv', index=False)
 
-# In[16]:
+# In[11]:
 
 
 import pandas as pd
