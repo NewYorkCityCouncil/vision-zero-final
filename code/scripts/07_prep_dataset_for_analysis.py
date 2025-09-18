@@ -714,7 +714,7 @@ intersection_pre_post_dataset_w_sl = intersections_inside_treatment_window[(inte
 # download
 intersection_pre_post_dataset_w_sl.to_csv('../data/output/full_ever_treated_dataset.csv', index=False)
 
-# In[ ]:
+# In[14]:
 
 
 # 2013-2016 minus intersections treated with anything but speed limit
@@ -790,4 +790,80 @@ print("\nVerification of the new dataset:")
 print(f"Unique years in the new dataset: {untreated_robustness_df_2013_2016['year'].unique()}")
 # Verify that none of the 8 intervention columns have a '1'
 intervention_sums = untreated_robustness_df_2013_2016[intersection_interventions].sum().sum()
+print(f"Sum of all 8 intervention columns in the new dataset: {intervention_sums} (should be 0)")
+
+# In[ ]:
+
+
+# 2013-2023 minus intersections treated with anything but speed limit
+
+# --- Setup: Load Data and Define Interventions ---
+
+# Load the full, original intersection-year level dataset
+try:
+    intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_final.csv')
+    print(f"Successfully loaded the full dataset. Shape: {intersection_intervention_table.shape}")
+except FileNotFoundError:
+    print("Error: The file '../data/output/intersection_intervention_table_final.csv' was not found.")
+    print("Please ensure the file path is correct and the original full dataset is available.")
+    exit()
+
+# Define the list of the 8 specific Vision Zero interventions to use for exclusion
+intersection_interventions = [
+    'leading_pedestrian_interval_post', 
+    'turn_traffic_calming_post', 
+    'slow_zones_post', 
+    'signal_retiming_post', 
+    'speed_humps_post', 
+    'street_improvement_project_post', 
+    'street_improvement_corridors_post', 
+    'enhanced_crossing_post'
+]
+
+# --- Step 1: Identify Intersections to Exclude ---
+
+# Find all unique intersection_ids that EVER received one of the 8 specified interventions.
+# This logic is the same as before, ensuring we identify any intersection treated at any point in time.
+treated_intersection_ids = intersection_intervention_table.loc[
+    (intersection_intervention_table[intersection_interventions] == 1).any(axis=1), 
+    'intersection_id'
+].unique()
+
+print(f"Found {len(treated_intersection_ids)} unique intersections that ever received one of the 8 VZ treatments.")
+
+# --- Step 2: Create the 'Untreated' Dataset ---
+
+# Filter the original dataframe to EXCLUDE the treated intersections identified above.
+untreated_intersections_df = intersection_intervention_table[
+    ~intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)
+].copy()
+
+print(f"Filtered to 'untreated' intersections. Shape of this intermediate dataset: {untreated_intersections_df.shape}")
+
+# --- Step 3: Apply the NEW, EXTENDED Time Cutoff (2013-2023) ---
+
+# Limit the 'untreated' dataset to the years 2013 through 2023, inclusive.
+# This is the only line that has changed from the previous script.
+untreated_robustness_df_2013_2023 = untreated_intersections_df[
+    (untreated_intersections_df['year'] >= 2013) & (untreated_intersections_df['year'] <= 2023)
+].copy()
+
+print(f"Applied the 2013-2023 time cutoff.")
+print(f"Final shape of the new extended dataset: {untreated_robustness_df_2013_2023.shape}")
+
+# --- Step 4: Save the New Extended Dataset ---
+
+# Save the resulting dataframe to a new CSV file with a descriptive name.
+output_path = '../data/output/intersection_intervention_table_untreated_2013-2023.csv'
+untreated_robustness_df_2013_2023.to_csv(output_path, index=False)
+
+print(f"\nSuccessfully created and saved the extended robustness check dataset to:\n{output_path}")
+
+# Optional: Verify the contents of the new dataset
+print("\nVerification of the new dataset:")
+# Check unique years to ensure the filter worked
+years_in_df = sorted(untreated_robustness_df_2013_2023['year'].unique())
+print(f"Years included in the new dataset: {years_in_df[0]} through {years_in_df[-1]}")
+# Verify that none of the 8 intervention columns have a '1'
+intervention_sums = untreated_robustness_df_2013_2023[intersection_interventions].sum().sum()
 print(f"Sum of all 8 intervention columns in the new dataset: {intervention_sums} (should be 0)")
