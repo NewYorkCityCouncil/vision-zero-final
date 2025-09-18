@@ -238,7 +238,58 @@ if(all(validation_check$was_treated)) {
 }
 ```
 
-# Regression 
+# Daylight-specific variable 
+
+```{r}
+# Define ttc_cols again to make this chunk self-contained
+ttc_cols <- colnames(sites_ttc_only)[str_starts(colnames(sites_ttc_only), "ttc_")]
+
+# Create the new categorical variable using case_when for clear, ordered logic
+sites_ttc_only <- sites_ttc_only %>%
+  mutate(
+    # The case_when() function evaluates conditions in order.
+    daylighting_dummy = case_when(
+      # 1. First, check if daylighting is present. If so, assign the "daylighting" category.
+      ttc_daylighting == 1 ~ "daylighting",
+      
+      # 2. If not, check if ANY other TTC is present. We do this by summing all TTC dummies.
+      # This condition is only reached if ttc_daylighting was 0.
+      rowSums(across(all_of(ttc_cols))) > 0 ~ "ttc_no_dl",
+      
+      # 3. If neither of the above is true, it means no TTCs were present. This is our baseline.
+      TRUE ~ "no_ttc"
+    )
+  )
+
+# --- Validation Step ---
+# It's crucial to verify the logic. We'll create a summary table.
+daylighting_validation <- sites_ttc_only %>%
+  # For each new category...
+  group_by(daylighting_dummy) %>%
+  # ...calculate the number of observations and key facts about the underlying dummies.
+  summarise(
+    n_rows = n(),
+    ttc_daylighting_min = min(ttc_daylighting), # Should be 1 only for "daylighting"
+    ttc_daylighting_max = max(ttc_daylighting), # Should be 1 only for "daylighting"
+    total_ttc_sum_min = min(rowSums(across(all_of(ttc_cols)))), # Should be 0 only for "no_ttc"
+    total_ttc_sum_max = max(rowSums(across(all_of(ttc_cols))))
+  )
+
+print("Validation of the new 'daylighting_dummy' variable:")
+print(daylighting_validation)
+
+# --- Prepare for Modeling ---
+# Convert the new variable to a factor and set the reference level to "no_ttc".
+# This is critical for correct interpretation in the regression model.
+sites_ttc_only$daylighting_dummy <- factor(sites_ttc_only$daylighting_dummy, 
+                                           levels = c("no_ttc", "ttc_no_dl", "daylighting"))
+
+print("---")
+print("Factor levels for 'daylighting_dummy' (first level is the reference):")
+print(levels(sites_ttc_only$daylighting_dummy))
+```
+
+# Regression for all TTCs
 
 ```{r}
 model_spline_ttc <- glmmTMB(
@@ -256,7 +307,7 @@ model_spline_ttc <- glmmTMB(
     ttc_slow_turn_design +
     leading_pedestrian_interval_post +
     # turn_traffic_calming_post +
-    enhanced_crossing_post + #not turned on for anything in this data
+    # enhanced_crossing_post + #not turned on for anything in this data
     speed_humps_post +
     street_improvement_project_post +
     street_improvement_corridors_post +
@@ -270,7 +321,7 @@ model_spline_ttc <- glmmTMB(
     scaled_time +   
     (1 | boro_name/ntaname/intersection_id),
   family = nbinom1,
-  data = sites_ever_treated_ttc
+  data = sites_ttc_only
 ) 
 
 summary(model_spline_ttc)
@@ -321,6 +372,33 @@ plot(fitted(model_spline_ttc), residuals(model_spline_ttc, type = "pearson"),
 abline(h = 0, col = "red")
 ```
 
+# Regression for daylighting
+
+```{r}
+model_spline_dl <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    daylighting_dummy +
+    leading_pedestrian_interval_post +
+    # turn_traffic_calming_post +
+    # enhanced_crossing_post + #not turned on for anything in this data
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ttc_only
+) 
+
+summary(model_spline_dl)
+```
 
 
 

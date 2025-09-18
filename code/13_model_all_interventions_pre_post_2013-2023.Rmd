@@ -215,6 +215,178 @@ ggplot(plot_data, aes(x = factor(year), y = num_intersections, fill = category))
   )
 ```
 
+```{r}
+# --- Hypothesis Test: Selection Bias in Early LPI Installation ---
+
+# Ensure the data is a data.table for efficiency
+setDT(sites_ever_treated)
+
+# Step 1: For each intersection, find the first year of any treatment and the first year of LPI treatment.
+# We exclude speed_limit_post from the 'any treatment' definition, as per your study design.
+treatment_cols <- c(
+    "turn_traffic_calming_post", "leading_pedestrian_interval_post",
+    "enhanced_crossing_post", "speed_humps_post", "street_improvement_project_post",
+    "street_improvement_corridors_post", "signal_retiming_post", "slow_zones_post"
+)
+
+# This calculates the first treatment year for each intersection ID
+cohort_data <- sites_ever_treated[, .(
+    # Find the minimum year where any of the specified treatment columns are 1
+    first_treat_year = min(year[rowSums(.SD, na.rm = TRUE) > 0], na.rm = TRUE),
+    # Separately, find the minimum year for LPI specifically
+    first_lpi_year = min(year[leading_pedestrian_interval_post == 1], na.rm = TRUE)
+  ), 
+  by = intersection_id, 
+  .SDcols = treatment_cols]
+
+# Replace Inf with NA for intersections that never received a treatment (if any)
+cohort_data[is.infinite(first_treat_year), first_treat_year := NA]
+cohort_data[is.infinite(first_lpi_year), first_lpi_year := NA]
+
+# Define the cohort based on the first treatment year
+cohort_data[, cohort := fcase(
+    first_treat_year %in% c(2013, 2014), "Early",
+    first_treat_year %in% 2015:2021, "Middle",
+    first_treat_year %in% c(2022, 2023), "Late",
+    default = "Never Treated"
+)]
+
+# Step 2: Merge this cohort information back to the main dataset
+sites_with_cohorts <- merge(sites_ever_treated, cohort_data, by = "intersection_id")
+
+
+# Step 3: Filter for the baseline year (2013) of the "Early" cohort
+early_cohort_baseline <- sites_with_cohorts[cohort == "Early" & year == 2013]
+
+# Step 4: Define our comparison groups within this baseline data
+# Group A: Got an LPI in 2013 or 2014. Group B: Did not.
+early_cohort_baseline[, got_early_lpi := first_lpi_year %in% c(2013, 2014)]
+
+# --- Analysis ---
+
+# 1. Summary Statistics: Calculate the mean and median casualties for each group
+summary_stats <- early_cohort_baseline[, .(
+    mean_casualties = mean(pedestrian_death_or_injury),
+    median_casualties = median(pedestrian_death_or_injury),
+    n_intersections = .N
+  ), by = got_early_lpi]
+
+print("--- Baseline (2013) Casualties in Early (2013-14) Treatment Cohort ---")
+print(summary_stats)
+
+# 2. Statistical Test: Use a t-test to see if the difference in means is significant.
+# A Wilcoxon test is also good since crash data is often not normally distributed.
+t_test_result <- t.test(pedestrian_death_or_injury ~ got_early_lpi, data = early_cohort_baseline)
+wilcox_test_result <- wilcox.test(pedestrian_death_or_injury ~ got_early_lpi, data = early_cohort_baseline)
+
+print("--- T-test for Difference in Means ---")
+print(t_test_result)
+
+print("--- Wilcoxon Rank Sum Test for Difference in Distributions ---")
+print(wilcox_test_result)
+
+
+# 3. Visualization: A boxplot is perfect for showing the difference in distributions.
+ggplot(early_cohort_baseline, aes(x = got_early_lpi, y = pedestrian_death_or_injury, fill = got_early_lpi)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.2, height=0.05) + # Optional: show raw points
+  scale_fill_brewer(palette = "Set1", name = "Received Early LPI", labels = c("No", "Yes")) +
+  labs(
+    title = "Selection Bias: Baseline Casualties (2013) for Early-Treated Intersections",
+    subtitle = "Comparing intersections that did vs. did not receive an LPI in 2013-14",
+    x = "Received an LPI in 2013-14?",
+    y = "Pedestrian Deaths or Injuries in 2013"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+# --- Hypothesis Test: Selection Bias in Early Signal Retiming Installation ---
+
+# Ensure the data is a data.table for efficiency
+setDT(sites_ever_treated)
+
+# Step 1: Find first treatment year and first signal retiming year.
+treatment_cols <- c(
+    "turn_traffic_calming_post", "leading_pedestrian_interval_post",
+    "enhanced_crossing_post", "speed_humps_post", "street_improvement_project_post",
+    "street_improvement_corridors_post", "signal_retiming_post", "slow_zones_post"
+)
+
+# This calculates the first treatment year for each intersection ID
+# NOTE: The only change here is adding the 'first_signal_retiming_year' calculation
+cohort_data <- sites_ever_treated[, .(
+    first_treat_year = min(year[rowSums(.SD, na.rm = TRUE) > 0], na.rm = TRUE),
+    # MODIFIED: Calculate the first year for signal retiming specifically
+    first_signal_retiming_year = min(year[signal_retiming_post == 1], na.rm = TRUE)
+  ), 
+  by = intersection_id, 
+  .SDcols = treatment_cols]
+
+# Replace Inf with NA for intersections that never received a treatment
+cohort_data[is.infinite(first_treat_year), first_treat_year := NA]
+# MODIFIED: Add the same cleaning step for the new variable
+cohort_data[is.infinite(first_signal_retiming_year), first_signal_retiming_year := NA]
+
+# Define the cohort based on the first treatment year (this part is unchanged)
+cohort_data[, cohort := fcase(
+    first_treat_year %in% c(2013, 2014), "Early",
+    first_treat_year %in% 2015:2021, "Middle",
+    first_treat_year %in% c(2022, 2023), "Late",
+    default = "Never Treated"
+)]
+
+# Step 2: Merge cohort information back (unchanged)
+sites_with_cohorts <- merge(sites_ever_treated, cohort_data, by = "intersection_id")
+
+# Step 3: Filter for the baseline year (2013) of the "Early" cohort (unchanged)
+early_cohort_baseline <- sites_with_cohorts[cohort == "Early" & year == 2013]
+
+# Step 4: Define comparison groups based on whether they got signal retiming early
+# MODIFIED: Create a new grouping variable for signal retiming
+early_cohort_baseline[, got_early_signal_retiming := first_signal_retiming_year %in% c(2013, 2014)]
+
+# --- Analysis ---
+
+# 1. Summary Statistics
+# MODIFIED: Group by the new variable
+summary_stats_sr <- early_cohort_baseline[, .(
+    mean_casualties = mean(pedestrian_death_or_injury),
+    median_casualties = median(pedestrian_death_or_injury),
+    n_intersections = .N
+  ), by = got_early_signal_retiming]
+
+print("--- Baseline (2013) Casualties for Signal Retiming in Early Cohort ---")
+print(summary_stats_sr)
+
+# 2. Statistical Tests
+# MODIFIED: Use the new grouping variable in the formulas
+t_test_result_sr <- t.test(pedestrian_death_or_injury ~ got_early_signal_retiming, data = early_cohort_baseline)
+wilcox_test_result_sr <- wilcox.test(pedestrian_death_or_injury ~ got_early_signal_retiming, data = early_cohort_baseline)
+
+print("--- T-test for Difference in Means (Signal Retiming) ---")
+print(t_test_result_sr)
+
+print("--- Wilcoxon Rank Sum Test (Signal Retiming) ---")
+print(wilcox_test_result_sr)
+
+# 3. Visualization
+# MODIFIED: Update aesthetics and labels for signal retiming
+ggplot(early_cohort_baseline, aes(x = got_early_signal_retiming, y = pedestrian_death_or_injury, fill = got_early_signal_retiming)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.2, height=0.05) +
+  scale_fill_brewer(palette = "Set1", name = "Received Early Signal Retiming", labels = c("No", "Yes")) +
+  labs(
+    title = "Selection Bias: Baseline Casualties (2013) for Signal Retiming",
+    subtitle = "Comparing intersections that did vs. did not receive Signal Retiming in 2013-14",
+    x = "Received Signal Retiming in 2013-14?",
+    y = "Pedestrian Deaths or Injuries in 2013"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
 # Picking a Model Type
 
 ```{r}
@@ -237,6 +409,8 @@ poisson_model <- glm(
     scaled_traffic_volume +
     scaled_pop_density +
     scaled_time +
+    early +
+    late +
     (1 | intersection_id),
   family = "poisson", 
   data = sites_ever_treated 
@@ -271,6 +445,8 @@ model_orig <- glmmTMB(
     scaled_traffic_volume + 
     scaled_pop_density +
     scaled_time +
+    early +
+    late +
     (1 | intersection_id),
   family = nbinom1,
   data = sites_ever_treated
@@ -330,7 +506,9 @@ model_nta_RE <- glmmTMB(
     scaled_summonses + 
     scaled_traffic_volume + 
     scaled_pop_density +        
-    scaled_time +       
+    scaled_time + 
+    early +
+    late +
     (1 | ntaname/intersection_id),
   family = nbinom1,
   data = sites_ever_treated
@@ -352,7 +530,9 @@ model_boro_RE <- glmmTMB(
     scaled_summonses + 
     scaled_traffic_volume + 
     scaled_pop_density +
-    scaled_time +       
+    scaled_time +  
+    early +
+    late +
     (1|boro_name/ntaname/intersection_id),
   family = nbinom1,
   data = sites_ever_treated
@@ -411,7 +591,7 @@ Splines allow for more flexible modeling of non-linear patterns in continuous co
 # check for non-linear patterns in continuous controls
 # scaled_pop_density looks the least linear
 
-ggplot(intervention_df, aes(x = scaled_summonses, y = pedestrian_death_or_injury)) +
+ggplot(sites_ever_treated, aes(x = scaled_summonses, y = pedestrian_death_or_injury)) +
   geom_point(alpha = 0.05, shape = 16) + 
   labs(
     title = "Pedestrian Deaths/Injuries vs. Scaled Traffic Summonses",
@@ -420,7 +600,7 @@ ggplot(intervention_df, aes(x = scaled_summonses, y = pedestrian_death_or_injury
   ) +
   theme_minimal()
 
-ggplot(intervention_df, aes(x = scaled_traffic_volume, y = pedestrian_death_or_injury)) +
+ggplot(sites_ever_treated, aes(x = scaled_traffic_volume, y = pedestrian_death_or_injury)) +
   geom_point(alpha = 0.05, shape = 16) + 
   labs(
     title = "Pedestrian Deaths/Injuries vs. Scaled Traffic Volume",
@@ -429,7 +609,7 @@ ggplot(intervention_df, aes(x = scaled_traffic_volume, y = pedestrian_death_or_i
   ) +
   theme_minimal()
 
-ggplot(intervention_df, aes(x = scaled_pop_density, y = pedestrian_death_or_injury)) +
+ggplot(sites_ever_treated, aes(x = scaled_pop_density, y = pedestrian_death_or_injury)) +
   geom_point(alpha = 0.05, shape = 16) + 
   labs(
     title = "Pedestrian Deaths/Injuries vs. Scaled Population Density",
@@ -438,7 +618,7 @@ ggplot(intervention_df, aes(x = scaled_pop_density, y = pedestrian_death_or_inju
   ) +
   theme_minimal()
 
-ggplot(intervention_df, aes(x = scaled_time, y = pedestrian_death_or_injury)) +
+ggplot(sites_ever_treated, aes(x = scaled_time, y = pedestrian_death_or_injury)) +
   geom_point(alpha = 0.05, shape = 16) + 
   labs(
     title = "Pedestrian Deaths/Injuries vs. Scaled Time",
@@ -468,6 +648,8 @@ model_spline <- glmmTMB(
     scaled_traffic_volume + 
     ns(scaled_pop_density, df = 2) +        
     scaled_time +   
+    early +
+    late +
     (1 | boro_name/ntaname/intersection_id),
   family = nbinom1,
   data = sites_ever_treated
@@ -528,7 +710,9 @@ custom_order <- c(
   "speed_humps_post",
   "enhanced_crossing_post",
   "leading_pedestrian_interval_post",
-  "turn_traffic_calming_post"
+  "turn_traffic_calming_post",
+  "early",
+  "late"
 )
 
 # create percent change data frame
