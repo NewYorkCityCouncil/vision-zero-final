@@ -316,6 +316,71 @@ testOutliers(sim_res_only_sl) # outliers
 ```
 
 ```{r}
-check_collinearity(sim_res_only_sl)
+check_collinearity(model_only_sl)
 ```
+
+# Mode: 2013-2016, ONLY speed limit treatments
+
+```{r}
+ever_treated_w_sl_only_2013_2016 <- read_csv('../data/output/intersection_table_speed_limit_only_2013-2016.csv')
+ever_treated_w_sl_only_2013_2016 <- ever_treated_w_sl_only_2013_2016 %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+
+model_only_sl_2 <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    # turn_traffic_calming_post +
+    # leading_pedestrian_interval_post +
+    # enhanced_crossing_post +
+    # speed_humps_post +
+    # street_improvement_project_post +
+    # street_improvement_corridors_post +
+    # signal_retiming_post +
+    # slow_zones_post +
+    speed_limit_post +
+    #covid_2020 + 
+    #scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    #scaled_time +   
+    (1 | intersection_id),
+  family = nbinom1,
+  data = ever_treated_w_sl_only_2013_2016
+) 
+
+summary(model_only_sl_2)
+```
+
+```{r}
+# diagnostics
+
+sim_res_only_sl_2 <- simulateResiduals(fittedModel = model_only_sl_2, n = 250, plot = TRUE)
+testZeroInflation(sim_res_only_sl_2) # zero-inflation test
+testDispersion(sim_res_only_sl_2) # dispersion test
+testUniformity(sim_res_only_sl_2) # KS test
+testOutliers(sim_res_only_sl_2) # outliers
+```
+
+```{r}
+check_collinearity(model_only_sl_2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
