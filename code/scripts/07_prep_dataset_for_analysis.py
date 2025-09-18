@@ -713,3 +713,81 @@ intersection_pre_post_dataset_w_sl = intersections_inside_treatment_window[(inte
 
 # download
 intersection_pre_post_dataset_w_sl.to_csv('../data/output/full_ever_treated_dataset.csv', index=False)
+
+# In[ ]:
+
+
+# 2013-2016 minus intersections treated with anything but speed limit
+
+# --- Setup: Load Data and Define Interventions ---
+
+# Load the full intersection-year level dataset
+# This should be the original, comprehensive file before any filtering was applied
+try:
+    intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_final.csv')
+    print(f"Successfully loaded data. Shape: {intersection_intervention_table.shape}")
+except FileNotFoundError:
+    print("Error: The file '../data/output/intersection_intervention_table_final.csv' was not found.")
+    print("Please ensure the file path is correct and the original full dataset is available.")
+    # Exit or handle the error as appropriate
+    exit()
+
+# Define the list of the 8 specific Vision Zero interventions you want to exclude
+# This list excludes 'speed_limit_post' as per your requirements
+intersection_interventions = [
+    'leading_pedestrian_interval_post', 
+    'turn_traffic_calming_post', 
+    'slow_zones_post', 
+    'signal_retiming_post', 
+    'speed_humps_post', 
+    'street_improvement_project_post', 
+    'street_improvement_corridors_post', 
+    'enhanced_crossing_post'
+]
+
+# --- Step 1: Identify Intersections to Exclude ---
+
+# Find all unique intersection_ids that EVER received one of the 8 specified interventions.
+# We do this by checking if any of the intervention columns is equal to 1 for any year.
+treated_intersection_ids = intersection_intervention_table.loc[
+    (intersection_intervention_table[intersection_interventions] == 1).any(axis=1), 
+    'intersection_id'
+].unique()
+
+print(f"Found {len(treated_intersection_ids)} unique intersections that received at least one of the 8 VZ treatments.")
+
+# --- Step 2: Create the 'Untreated' Dataset ---
+
+# Filter the original dataframe to EXCLUDE the treated intersections identified above.
+# The '~' operator inverts the boolean mask, so we keep everything NOT in the list.
+untreated_intersections_df = intersection_intervention_table[
+    ~intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)
+].copy()
+
+print(f"Filtered to 'untreated' intersections. Shape of this intermediate dataset: {untreated_intersections_df.shape}")
+
+# --- Step 3: Apply the Time Cutoff (2013-2016) ---
+
+# Now, limit the 'untreated' dataset to the years 2013 through 2016, inclusive.
+untreated_robustness_df_2013_2016 = untreated_intersections_df[
+    (untreated_intersections_df['year'] >= 2013) & (untreated_intersections_df['year'] <= 2016)
+].copy()
+
+print(f"Applied the 2013-2016 time cutoff.")
+print(f"Final shape of the robustness check dataset: {untreated_robustness_df_2013_2016.shape}")
+
+# --- Step 4: Save the New Dataset ---
+
+# Save the resulting dataframe to a new CSV file for your robustness checks.
+output_path = '../data/output/intersection_intervention_table_untreated_2013-2016.csv'
+untreated_robustness_df_2013_2016.to_csv(output_path, index=False)
+
+print(f"\nSuccessfully created and saved the robustness check dataset to:\n{output_path}")
+
+# Optional: Verify the contents of the new dataset
+print("\nVerification of the new dataset:")
+# Check unique years to ensure the filter worked
+print(f"Unique years in the new dataset: {untreated_robustness_df_2013_2016['year'].unique()}")
+# Verify that none of the 8 intervention columns have a '1'
+intervention_sums = untreated_robustness_df_2013_2016[intersection_interventions].sum().sum()
+print(f"Sum of all 8 intervention columns in the new dataset: {intervention_sums} (should be 0)")
