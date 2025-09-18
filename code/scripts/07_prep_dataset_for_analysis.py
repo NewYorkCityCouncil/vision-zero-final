@@ -963,3 +963,98 @@ print(f"Sum of all 8 main intervention columns: {main_intervention_sum} (should 
 speed_limit_sum = speed_limit_only_df_2013_2023['speed_limit_post'].sum()
 print(f"Sum of the 'speed_limit_post' column: {speed_limit_sum} (should be > 0)")
 
+
+# In[17]:
+
+
+# 2013-2016 with ONLY solely speed limit 
+
+# --- Setup: Load Data and Define Interventions ---
+
+# Load the full, original intersection-year level dataset
+try:
+    intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_final.csv')
+    print(f"Successfully loaded the full dataset. Shape: {intersection_intervention_table.shape}")
+except FileNotFoundError:
+    print("Error: The file '../data/output/intersection_intervention_table_final.csv' was not found.")
+    print("Please ensure the file path is correct and the original full dataset is available.")
+    exit()
+
+# Define the list of the 8 "complex" VZ interventions
+main_interventions = [
+    'leading_pedestrian_interval_post', 
+    'turn_traffic_calming_post', 
+    'slow_zones_post', 
+    'signal_retiming_post', 
+    'speed_humps_post', 
+    'street_improvement_project_post', 
+    'street_improvement_corridors_post', 
+    'enhanced_crossing_post'
+]
+
+# Define the list of ALL 9 interventions
+all_interventions = main_interventions + ['speed_limit_post']
+
+# --- Step 1: Identify Intersection Groups to Exclude ---
+
+# This logic is identical to the previous script. We identify intersections based on their entire history.
+
+# Group 1: Find all IDs that EVER received one of the 8 main interventions.
+complex_treated_ids = intersection_intervention_table.loc[
+    (intersection_intervention_table[main_interventions] == 1).any(axis=1), 
+    'intersection_id'
+].unique()
+print(f"Found {len(complex_treated_ids)} unique intersections that received at least one of the 8 main VZ treatments.")
+
+# Group 2: Find all IDs that were NEVER treated with ANYTHING.
+any_treated_ids = intersection_intervention_table.loc[
+    (intersection_intervention_table[all_interventions] == 1).any(axis=1), 
+    'intersection_id'
+].unique()
+all_intersection_ids = set(intersection_intervention_table['intersection_id'].unique())
+purely_untreated_ids = all_intersection_ids - set(any_treated_ids)
+print(f"Found {len(purely_untreated_ids)} unique intersections that received no interventions at all.")
+
+# Combine the two groups of IDs to exclude
+ids_to_exclude = set(complex_treated_ids).union(purely_untreated_ids)
+print(f"Total unique intersections to exclude: {len(ids_to_exclude)}")
+
+
+# --- Step 2: Create the "Speed Limit Only" Dataset ---
+
+# Filter the original dataframe to keep only the intersections NOT in the exclusion list.
+speed_limit_only_df = intersection_intervention_table[
+    ~intersection_intervention_table['intersection_id'].isin(ids_to_exclude)
+].copy()
+
+print(f"Filtered to 'speed limit only' intersections. Shape of this intermediate dataset: {speed_limit_only_df.shape}")
+
+# --- Step 3: Apply the SHORTER Time Cutoff (2013-2016) ---
+
+# Limit the 'speed limit only' dataset to the years 2013 through 2016, inclusive.
+# This is the key change from the last script.
+speed_limit_only_df_2013_2016 = speed_limit_only_df[
+    (speed_limit_only_df['year'] >= 2013) & (speed_limit_only_df['year'] <= 2016)
+].copy()
+
+print(f"Applied the 2013-2016 time cutoff.")
+print(f"Final shape of the 'speed limit only' 2013-2016 dataset: {speed_limit_only_df_2013_2016.shape}")
+
+# --- Step 4: Save the New Dataset ---
+
+# Save the resulting dataframe to a new CSV file with a clear, descriptive name.
+output_path = '../data/output/intersection_table_speed_limit_only_2013-2016.csv'
+speed_limit_only_df_2013_2016.to_csv(output_path, index=False)
+
+print(f"\nSuccessfully created and saved the 'speed limit only' (2013-2016) dataset to:\n{output_path}")
+
+# --- Verification ---
+print("\nVerifying the contents of the new dataset:")
+# Check unique years
+print(f"Unique years in final dataset: {sorted(speed_limit_only_df_2013_2016['year'].unique())}")
+# Check that none of the 8 main intervention columns have a '1'
+main_intervention_sum = speed_limit_only_df_2013_2016[main_interventions].sum().sum()
+print(f"Sum of all 8 main intervention columns: {main_intervention_sum} (should be 0)")
+# Check that the 'speed_limit_post' column has some '1's
+speed_limit_sum = speed_limit_only_df_2013_2016['speed_limit_post'].sum()
+print(f"Sum of the 'speed_limit_post' column: {speed_limit_sum} (should be > 0)")
