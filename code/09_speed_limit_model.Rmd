@@ -219,7 +219,55 @@ testOutliers(sim_res_sl_2) # outliers
 check_collinearity(model_w_sl_2)
 ```
 
+# Mode: 2013-2023, no non-speed limit treatments
 
+```{r}
+ever_treated_w_sl_2013_2023 <- read_csv('../data/output/intersection_intervention_table_untreated_2013-2023.csv')
+ever_treated_w_sl_2013_2023 <- ever_treated_w_sl_2013_2023 %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+
+model_w_sl_3 <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    # turn_traffic_calming_post +
+    # leading_pedestrian_interval_post +
+    # enhanced_crossing_post +
+    # speed_humps_post +
+    # street_improvement_project_post +
+    # street_improvement_corridors_post +
+    # signal_retiming_post +
+    # slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | ntaname/intersection_id),
+  family = nbinom1,
+  data = ever_treated_w_sl_2013_2023
+) 
+
+summary(model_w_sl_3)
+```
+
+```{r}
+# diagnostics
+
+sim_res_sl_3 <- simulateResiduals(fittedModel = model_w_sl_3, n = 250, plot = TRUE)
+testZeroInflation(sim_res_sl_3) # zero-inflation test
+testDispersion(sim_res_sl_3) # dispersion test
+testUniformity(sim_res_sl_3) # KS test
+testOutliers(sim_res_sl_3) # outliers
+```
+
+```{r}
+check_collinearity(model_w_sl_3)
+```
 
 
 
