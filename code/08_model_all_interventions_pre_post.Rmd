@@ -47,6 +47,28 @@ sites_ever_treated <- sites_ever_treated %>%
   )
 ```
 
+```{r}
+# get unique intersections for each treatment
+
+sites_ever_treated %>%
+  pivot_longer(
+    cols = c(leading_pedestrian_interval_post,
+             turn_traffic_calming_post,
+             enhanced_crossing_post,
+             speed_humps_post,
+             street_improvement_project_post,
+             street_improvement_corridors_post,
+             signal_retiming_post,
+             slow_zones_post,
+             speed_limit_post),
+    names_to = "intervention",
+    values_to = "treated"
+  ) %>%
+  filter(treated == 1) %>%
+  distinct(intersection_id, intervention) %>%
+  count(intervention, name = "n_unique_intersections")
+```
+
 # Picking a Model Type
 
 ```{r}
