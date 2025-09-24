@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[2]:
 
 
 import pandas as pd
@@ -792,7 +792,7 @@ print(f"Unique years in the new dataset: {untreated_robustness_df_2013_2016['yea
 intervention_sums = untreated_robustness_df_2013_2016[intersection_interventions].sum().sum()
 print(f"Sum of all 8 intervention columns in the new dataset: {intervention_sums} (should be 0)")
 
-# In[15]:
+# In[3]:
 
 
 # 2013-2023 minus intersections treated with anything but speed limit
@@ -823,7 +823,6 @@ intersection_interventions = [
 # --- Step 1: Identify Intersections to Exclude ---
 
 # Find all unique intersection_ids that EVER received one of the 8 specified interventions.
-# This logic is the same as before, ensuring we identify any intersection treated at any point in time.
 treated_intersection_ids = intersection_intervention_table.loc[
     (intersection_intervention_table[intersection_interventions] == 1).any(axis=1), 
     'intersection_id'
@@ -834,16 +833,40 @@ print(f"Found {len(treated_intersection_ids)} unique intersections that ever rec
 # --- Step 2: Create the 'Untreated' Dataset ---
 
 # Filter the original dataframe to EXCLUDE the treated intersections identified above.
+# This dataframe now contains only intersections that received 'speed_limit_only' or 'nothing'.
 untreated_intersections_df = intersection_intervention_table[
     ~intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)
 ].copy()
 
 print(f"Filtered to 'untreated' intersections. Shape of this intermediate dataset: {untreated_intersections_df.shape}")
 
+
+# --- Step 2.5: Create the 'source' Column (NEW SECTION) ---
+# Here we add the indicator variable to distinguish between the two types of intersections remaining.
+
+# To do this efficiently, we first determine if an intersection EVER received the speed limit.
+# We use groupby() and transform('max') to check the entire history of each intersection.
+# This creates a temporary series where each row's value is the max 'speed_limit_post' for its intersection_id.
+untreated_intersections_df['ever_got_speed_limit'] = untreated_intersections_df.groupby('intersection_id')['speed_limit_post'].transform('max')
+
+# Now, use np.where to create the 'source' column based on this check.
+# If 'ever_got_speed_limit' is 1, the source is 'speed_limit_only'.
+# If it's 0, the source is 'nothing'.
+untreated_intersections_df['source'] = np.where(
+    untreated_intersections_df['ever_got_speed_limit'] == 1, 
+    'speed_limit_only', 
+    'nothing'
+)
+
+# We can now drop the temporary helper column
+untreated_intersections_df = untreated_intersections_df.drop(columns=['ever_got_speed_limit'])
+
+print("Successfully created the 'source' column to identify intersection types.")
+
+
 # --- Step 3: Apply the NEW, EXTENDED Time Cutoff (2013-2023) ---
 
 # Limit the 'untreated' dataset to the years 2013 through 2023, inclusive.
-# This is the only line that has changed from the previous script.
 untreated_robustness_df_2013_2023 = untreated_intersections_df[
     (untreated_intersections_df['year'] >= 2013) & (untreated_intersections_df['year'] <= 2023)
 ].copy()
@@ -859,14 +882,41 @@ untreated_robustness_df_2013_2023.to_csv(output_path, index=False)
 
 print(f"\nSuccessfully created and saved the extended robustness check dataset to:\n{output_path}")
 
-# Optional: Verify the contents of the new dataset
+# --- Step 5: Verification (EXPANDED SECTION) ---
+
 print("\nVerification of the new dataset:")
 # Check unique years to ensure the filter worked
 years_in_df = sorted(untreated_robustness_df_2013_2023['year'].unique())
 print(f"Years included in the new dataset: {years_in_df[0]} through {years_in_df[-1]}")
+
 # Verify that none of the 8 intervention columns have a '1'
 intervention_sums = untreated_robustness_df_2013_2023[intersection_interventions].sum().sum()
 print(f"Sum of all 8 intervention columns in the new dataset: {intervention_sums} (should be 0)")
+
+# --- NEW VERIFICATION STEPS for the 'source' column ---
+print("\nVerifying the new 'source' column:")
+# 1. Check the distribution of values in the 'source' column.
+#    This confirms that only our two expected values exist.
+source_counts = untreated_robustness_df_2013_2023['source'].value_counts()
+print("Value counts for the 'source' column:")
+print(source_counts)
+
+# 2. Perform a cross-tabulation to rigorously check the logic.
+#    We check if intersections labeled 'nothing' truly never have 'speed_limit_post' = 1.
+#    And if intersections labeled 'speed_limit_only' do have 'speed_limit_post' = 1 at some point.
+crosstab_check = pd.crosstab(
+    untreated_robustness_df_2013_2023['source'],
+    untreated_robustness_df_2013_2023.groupby('intersection_id')['speed_limit_post'].transform('max'),
+    rownames=['Source Label'],
+    colnames=['Ever Received Speed Limit?']
+)
+print("\nCross-tabulation check (off-diagonals should be 0):")
+print(crosstab_check)
+
+if (crosstab_check.loc['nothing', 1] == 0) and (crosstab_check.loc['speed_limit_only', 0] == 0):
+    print("\nVerification successful: 'source' column logic is correct.")
+else:
+    print("\nVerification FAILED: There is a mismatch in the 'source' column logic.")
 
 # In[16]:
 
