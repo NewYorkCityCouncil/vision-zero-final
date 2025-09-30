@@ -196,7 +196,8 @@ model_w_sl_2 <- glmmTMB(
     #scaled_summonses + 
     scaled_traffic_volume + 
     ns(scaled_pop_density, df = 2) +        
-    #scaled_time +   
+    #scaled_time + 
+    source +
     (1 | intersection_id),
   family = nbinom1,
   data = ever_treated_w_sl_2013_2016
@@ -247,6 +248,7 @@ model_w_sl_3 <- glmmTMB(
     scaled_traffic_volume + 
     ns(scaled_pop_density, df = 2) +        
     scaled_time +   
+    source +
     (1 | intersection_id),
   family = nbinom1,
   data = ever_treated_w_sl_2013_2023
