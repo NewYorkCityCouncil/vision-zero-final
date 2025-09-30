@@ -65,8 +65,17 @@ sites_ever_treated %>%
     values_to = "treated"
   ) %>%
   filter(treated == 1) %>%
-  distinct(intersection_id, intervention) %>%
-  count(intervention, name = "n_unique_intersections")
+  # Group by the intervention type
+  group_by(intervention) %>%
+  # Calculate both summaries at once
+  summarise(
+    # This counts the number of unique intersection_ids for each intervention
+    n_unique_intersections = n_distinct(intersection_id), 
+    
+    # This counts the total number of rows for each intervention
+    n_total_rows = n()
+  ) %>%
+  ungroup() # Good practice to ungroup after summarising
 ```
 
 # Picking a Model Type

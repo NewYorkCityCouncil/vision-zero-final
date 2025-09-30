@@ -207,6 +207,23 @@ summary(model_w_sl_2)
 ```
 
 ```{r}
+# Get the confidence intervals for the log-coefficients
+ci_log <- confint(model_w_sl_2, parm = "beta_", method = "wald") # Wald is fastest
+
+# Get the coefficients table from the summary
+summary_table <- summary(model_w_sl_2)$coefficients$cond
+
+# Combine the log-estimates and log-CIs
+log_results <- cbind(summary_table, ci_log)
+
+# Exponentiate everything to get IRRs and their CIs
+irr_results <- exp(log_results)
+
+# Print the final table
+print(irr_results)
+```
+
+```{r}
 # diagnostics
 
 sim_res_sl_2 <- simulateResiduals(fittedModel = model_w_sl_2, n = 250, plot = TRUE)
@@ -255,6 +272,23 @@ model_w_sl_3 <- glmmTMB(
 ) 
 
 summary(model_w_sl_3)
+```
+
+```{r}
+# Get the confidence intervals for the log-coefficients
+ci_log <- confint(model_w_sl_3, parm = "beta_", method = "wald") # Wald is fastest
+
+# Get the coefficients table from the summary
+summary_table <- summary(model_w_sl_3)$coefficients$cond
+
+# Combine the log-estimates and log-CIs
+log_results <- cbind(summary_table, ci_log)
+
+# Exponentiate everything to get IRRs and their CIs
+irr_results <- exp(log_results)
+
+# Print the final table
+print(irr_results)
 ```
 
 ```{r}
