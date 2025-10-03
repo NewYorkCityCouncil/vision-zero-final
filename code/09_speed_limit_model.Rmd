@@ -24,151 +24,6 @@ library(plotly)
 library(ggeffects)
 ```
 
-```{r}
-# uploading
-speed_limit_treated <- read_csv('../data/output/speed_limit_intervention_table.csv', show_col_types = FALSE)
-
-# meant to handle large datasets
-speed_limit_treated <- as.data.table(speed_limit_treated)
-```
-
-```{r}
-# scale variables
-# the odds ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor.
-
-speed_limit_treated <- speed_limit_treated %>%
-  mutate(
-    scaled_pop = scale(nyc_metro_pop),
-    scaled_summonses = scale(citywide_traffic_summonses),
-    scaled_traffic_volume = scale(nyc_metro_dvmt),
-    scaled_pop_density = scale(pop_per_sqmi),
-    scaled_time = scale(time)
-  )
-```
-
-# Model 
-
-```{r}
-# intersections that solely received citywide speed limit as an intervention
-
-model_sl <- glmmTMB(
-  pedestrian_death_or_injury ~
-    speed_limit_post +
-    covid_2020 +
-    scaled_summonses +
-    scaled_traffic_volume + 
-    ns(scaled_pop_density, df = 2) +
-    scaled_time +
-    (1 | boro_name/ntaname/intersection_id),
-  family = nbinom1,
-  data = speed_limit_treated
-)
-
-summary(model_sl)
-```
-
-
-```{r}
-# diagnostics
-
-sim_res_sl <- simulateResiduals(fittedModel = model_sl, n = 250, plot = TRUE)
-testZeroInflation(sim_res_sl) # zero-inflation test
-testDispersion(sim_res_sl) # dispersion test
-testUniformity(sim_res_sl) # KS test
-testOutliers(sim_res_sl) # outliers
-```
-
-```{r}
-ever_treated_w_sl <- read_csv('../data/output/full_ever_treated_dataset.csv')
-ever_treated_w_sl <- ever_treated_w_sl %>%
-  mutate(
-    scaled_summonses = scale(citywide_traffic_summonses),
-    scaled_traffic_volume = scale(nyc_metro_dvmt),
-    scaled_pop_density = scale(pop_per_sqmi),
-    scaled_time = scale(time)
-  )
-
-model_w_sl <- glmmTMB(
-  pedestrian_death_or_injury ~ 
-    turn_traffic_calming_post +
-    leading_pedestrian_interval_post +
-    enhanced_crossing_post +
-    speed_humps_post +
-    street_improvement_project_post +
-    street_improvement_corridors_post +
-    signal_retiming_post +
-    slow_zones_post +
-    speed_limit_post +
-    covid_2020 + 
-    scaled_summonses + 
-    scaled_traffic_volume + 
-    ns(scaled_pop_density, df = 2) +        
-    scaled_time +   
-    (1 | boro_name/ntaname/intersection_id),
-  family = nbinom1,
-  data = ever_treated_w_sl
-) 
-
-summary(model_w_sl)
-```
-
-```{r}
-# diagnostics
-
-sim_res_w_sl <- simulateResiduals(fittedModel = model_w_sl, n = 250, plot = TRUE)
-testZeroInflation(sim_res_w_sl) # zero-inflation test
-testDispersion(sim_res_w_sl) # dispersion test
-testUniformity(sim_res_w_sl) # KS test
-testOutliers(sim_res_w_sl) # outliers
-```
-
-```{r}
-# all intersections, even those never treated (2013-2023)
-
-all_intersections <- read_csv('../data/output/intersection_intervention_table_final.csv')
-all_intersections <- all_intersections %>%
-  mutate(
-    scaled_summonses = scale(citywide_traffic_summonses),
-    scaled_traffic_volume = scale(nyc_metro_dvmt),
-    scaled_pop_density = scale(pop_per_sqmi),
-    scaled_time = scale(time)
-  )
-
-model_all <- glmmTMB(
-  pedestrian_death_or_injury ~ 
-    turn_traffic_calming_post +
-    leading_pedestrian_interval_post +
-    enhanced_crossing_post +
-    speed_humps_post +
-    street_improvement_project_post +
-    street_improvement_corridors_post +
-    signal_retiming_post +
-    slow_zones_post +
-    speed_limit_post +
-    covid_2020 + 
-    scaled_summonses + 
-    scaled_traffic_volume + 
-    ns(scaled_pop_density, df = 2) +        
-    scaled_time +   
-    (1 | boro_name/ntaname/intersection_id),
-  family = nbinom1,
-  data = all_intersections %>% filter(all_intersections$year >= 2013 & all_intersections$year <= 2023)
-) 
-
-summary(model_all)
-
-```
-
-```{r}
-# diagnostics
-
-sim_res_all <- simulateResiduals(fittedModel = model_all, n = 250, plot = TRUE)
-testZeroInflation(sim_res_all) # zero-inflation test
-testDispersion(sim_res_all) # dispersion test
-testUniformity(sim_res_all) # KS test
-testOutliers(sim_res_all) # outliers
-```
-
 # Mode: 2013-2016, no non-speed limit treatments
 
 ```{r}
@@ -181,7 +36,7 @@ ever_treated_w_sl_2013_2016 <- ever_treated_w_sl_2013_2016 %>%
     scaled_time = scale(time)
   )
 
-model_w_sl_2 <- glmmTMB(
+model_w_sl <- glmmTMB(
   pedestrian_death_or_injury ~ 
     # turn_traffic_calming_post +
     # leading_pedestrian_interval_post +
@@ -201,6 +56,74 @@ model_w_sl_2 <- glmmTMB(
     (1 | intersection_id),
   family = nbinom1,
   data = ever_treated_w_sl_2013_2016
+) 
+
+summary(model_w_sl)
+```
+
+```{r}
+# Get the confidence intervals for the log-coefficients
+ci_log <- confint(model_w_sl, parm = "beta_", method = "wald") # Wald is fastest
+
+# Get the coefficients table from the summary
+summary_table <- summary(model_w_sl)$coefficients$cond
+
+# Combine the log-estimates and log-CIs
+log_results <- cbind(summary_table, ci_log)
+
+# Exponentiate everything to get IRRs and their CIs
+irr_results <- exp(log_results)
+
+# Print the final table
+print(irr_results)
+```
+
+```{r}
+# diagnostics
+
+sim_res_sl <- simulateResiduals(fittedModel = model_w_sl, n = 250, plot = TRUE)
+testZeroInflation(sim_res_sl) # zero-inflation test
+testDispersion(sim_res_sl) # dispersion test
+testUniformity(sim_res_sl) # KS test
+testOutliers(sim_res_sl) # outliers
+```
+
+```{r}
+check_collinearity(model_w_sl)
+```
+
+# Mode: 2013-2023, no non-speed limit treatments
+
+```{r}
+ever_treated_w_sl_2013_2023 <- read_csv('../data/output/intersection_intervention_table_untreated_2013-2023.csv')
+ever_treated_w_sl_2013_2023 <- ever_treated_w_sl_2013_2023 %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+
+model_w_sl_2 <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    # turn_traffic_calming_post +
+    # leading_pedestrian_interval_post +
+    # enhanced_crossing_post +
+    # speed_humps_post +
+    # street_improvement_project_post +
+    # street_improvement_corridors_post +
+    # signal_retiming_post +
+    # slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    source +
+    (1 | intersection_id),
+  family = nbinom1,
+  data = ever_treated_w_sl_2013_2023
 ) 
 
 summary(model_w_sl_2)
@@ -235,74 +158,6 @@ testOutliers(sim_res_sl_2) # outliers
 
 ```{r}
 check_collinearity(model_w_sl_2)
-```
-
-# Mode: 2013-2023, no non-speed limit treatments
-
-```{r}
-ever_treated_w_sl_2013_2023 <- read_csv('../data/output/intersection_intervention_table_untreated_2013-2023.csv')
-ever_treated_w_sl_2013_2023 <- ever_treated_w_sl_2013_2023 %>%
-  mutate(
-    scaled_summonses = scale(citywide_traffic_summonses),
-    scaled_traffic_volume = scale(nyc_metro_dvmt),
-    scaled_pop_density = scale(pop_per_sqmi),
-    scaled_time = scale(time)
-  )
-
-model_w_sl_3 <- glmmTMB(
-  pedestrian_death_or_injury ~ 
-    # turn_traffic_calming_post +
-    # leading_pedestrian_interval_post +
-    # enhanced_crossing_post +
-    # speed_humps_post +
-    # street_improvement_project_post +
-    # street_improvement_corridors_post +
-    # signal_retiming_post +
-    # slow_zones_post +
-    speed_limit_post +
-    covid_2020 + 
-    scaled_summonses + 
-    scaled_traffic_volume + 
-    ns(scaled_pop_density, df = 2) +        
-    scaled_time +   
-    source +
-    (1 | intersection_id),
-  family = nbinom1,
-  data = ever_treated_w_sl_2013_2023
-) 
-
-summary(model_w_sl_3)
-```
-
-```{r}
-# Get the confidence intervals for the log-coefficients
-ci_log <- confint(model_w_sl_3, parm = "beta_", method = "wald") # Wald is fastest
-
-# Get the coefficients table from the summary
-summary_table <- summary(model_w_sl_3)$coefficients$cond
-
-# Combine the log-estimates and log-CIs
-log_results <- cbind(summary_table, ci_log)
-
-# Exponentiate everything to get IRRs and their CIs
-irr_results <- exp(log_results)
-
-# Print the final table
-print(irr_results)
-```
-
-```{r}
-# diagnostics
-
-sim_res_sl_3 <- simulateResiduals(fittedModel = model_w_sl_3, n = 250, plot = TRUE)
-testZeroInflation(sim_res_sl_3) # zero-inflation test
-testDispersion(sim_res_sl_3) # dispersion test
-testUniformity(sim_res_sl_3) # KS test
-testOutliers(sim_res_sl_3) # outliers
-```
-
-```{r}
-check_collinearity(model_w_sl_3)
 ```
 
 # Mode: 2013-2023, ONLY speed limit treatments

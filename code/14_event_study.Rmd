@@ -1,10 +1,13 @@
 ---
-title: "Parallel Trends Assumption Test for NYC Vision Zero Analysis"
+title: "PTA Analyses for NYC Vision Zero Study"
+author: "Your Name"
+date: "`r Sys.Date()`"
 output:
   html_document:
     toc: true
     toc_float: true
     theme: united
+    code_folding: show
 ---
 
 ```{r setup, include=FALSE}
@@ -12,34 +15,38 @@ output:
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
-### Introduction
+## Introduction
 
-This document outlines the methodology and R code for testing the parallel trends assumption, a critical requirement for our staggered difference-in-difference analysis of NYC's Vision Zero program. Given the complex nature of the study—with 9 different treatments adopted at various times—we will employ an event study framework.
+This document provides the additional analyses and diagnostic checks for the manuscript. It includes:
 
-We will conduct two main types of tests:
-1.  **A Global Test:** We will define the "event" as the year an intersection received its *first* Vision Zero treatment (excluding the 2014 citywide speed limit change). This provides a general test of whether soon-to-be-treated intersections were on a parallel path with not-yet-treated intersections.
-2.  **Intervention-Specific Tests (Automated):** We will programmatically test the assumption for each of the 9 interventions individually. For each test, we will create event-time dummies for the target intervention while keeping the other 8 interventions in the model as controls.
+1.  A visualization of the overall trend in pedestrian casualties in the analytic sample.
+2.  A series of visual and formal tests of the parallel trends assumption, a critical requirement for the staggered difference-in-difference design.
 
-### 1. Load Libraries and Prepare Data
+All analyses are conducted using the final analytic dataset as described in the main paper.
 
-First, we load the necessary libraries and the analytic dataset, then scale the continuous predictors as was done for the main analysis.
+## 1. Data Loading and Preparation
 
-```{r libraries_and_data_load}
-# --- Libraries ---
+This initial step loads all necessary R packages and prepares the analytic dataset. This includes loading the data and scaling continuous predictor variables as specified in the main model.
+
+```{r data_load_and_prep}
+# Load all required libraries for the entire analysis
 library(tidyverse)
 library(data.table)
 library(glmmTMB)
 library(splines)
 library(broom)
+library(broom.mixed)
 library(ggplot2)
 library(tools) 
-library(kableExtra) # For string formatting in plot titles
+library(forcats)
+library(patchwork)
+library(kableExtra) 
+library(Kendall)
 
-# --- Global Plotting Theme ---
+# Set a consistent global theme for all plots
 theme_set(theme_minimal(base_size = 14))
 
-# --- Load and Prepare Data ---
-# IMPORTANT: Adjust the file path as needed.
+# Load the main analytic dataset
 file_path <- '../data/output/intersection_intervention_table_ever_treated_2015-2022.csv'
 
 if (!file.exists(file_path)) {
@@ -47,9 +54,8 @@ if (!file.exists(file_path)) {
 }
 
 sites_ever_treated <- read_csv(file_path, show_col_types = FALSE)
-sites_ever_treated <- as.data.table(sites_ever_treated)
 
-# Scale continuous variables for the model
+# Scale continuous variables for use in regression models
 sites_ever_treated <- sites_ever_treated %>%
   mutate(
     scaled_summonses = scale(citywide_traffic_summonses),
@@ -61,24 +67,72 @@ sites_ever_treated <- sites_ever_treated %>%
 print("Data loaded and prepared successfully.")
 ```
 
-## 2. Method 1: Global Parallel Trends Test (First Treatment Event)
+---
 
-Here, we test whether trends were parallel leading up to an intersection's *first* VZ intervention (from the main set of 8). This gives a holistic view of the assumption for the overall sample.
+## 2. Overall Trend in Pedestrian Casualties (Figure 1)
 
-### Step 2.1: Identify the First Treatment Year for Each Intersection
+This section generates Figure 1, which displays the total number of annual pedestrian casualties within our analytic sample from 2013 to 2023. This plot provides context for the overall trend in the outcome variable during the study period. A Mann-Kendall test is performed to formally test for a monotonic trend.
 
-We find the earliest year (from 2015-2021) that each intersection received any of the 8 main treatments.
+```{r figure_1_total_casualties}
+# Summarize the data by year, calculating the sum of casualties.
+yearly_totals <- sites_ever_treated %>%
+  group_by(year) %>%
+  summarise(
+    total_casualties = sum(pedestrian_death_or_injury, na.rm = TRUE),
+    .groups = 'drop'
+  )
 
-```{r find_first_treatment_year}
-# The 8 main treatment variables (excluding the universal speed limit)
+# Perform a Mann-Kendall trend test on the time series of total casualties.
+mk_test_result_total <- MannKendall(yearly_totals$total_casualties)
+
+# Format the p-value for display on the plot.
+p_value_total <- mk_test_result_total$sl
+if (p_value_total < 0.001) {
+  p_text_total <- "Mann-Kendall p < 0.001"
+} else {
+  p_text_total <- sprintf("Mann-Kendall p = %.3f", p_value_total)
+}
+
+# Generate the plot.
+ggplot(yearly_totals, aes(x = year, y = total_casualties)) +
+  geom_line(linewidth = 1.2, color = "darkred") +
+  geom_point(size = 3, color = "darkred") +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", color = "black", linewidth = 0.8) +
+  geom_vline(xintercept = 2014.5, linetype = "dashed", color = "darkgreen", alpha = 0.7) +
+  annotate("text", x = 2014.5, y = max(yearly_totals$total_casualties), 
+           label = "Vision Zero Begins", hjust = -0.1, size = 3.5, color = "darkgreen") +
+  annotate("text", x = max(yearly_totals$year), y = max(yearly_totals$total_casualties), 
+           label = p_text_total, hjust = 1.1, vjust = 1.5, size = 4, color = "black", fontface = "italic") +
+  scale_x_continuous(breaks = seq(min(yearly_totals$year), max(yearly_totals$year), by = 1)) +
+  labs(
+    title = "Total Annual Pedestrian Casualties in the Analytic Sample",
+    subtitle = "Showing the unadjusted citywide trend from 2013 to 2023",
+    x = "Year",
+    y = "Total Annual Pedestrian Casualties"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+---
+
+## 3. Parallel Trends Assumption Checks
+
+This section contains the three diagnostic checks for the parallel trends assumption.
+
+### 3.1 Visual Check by Treatment Cohort (Figure 2)
+
+This plot provides an intuitive, descriptive check of the assumption. It groups intersections by their first treatment year and plots their average raw casualty trends over calendar time. Parallel movement of the lines prior to their respective treatment start dates provides visual support for the assumption.
+
+```{r figure_2_cohort_plot}
+# Define the non-universal treatment variables.
 treatment_vars <- c(
   "turn_traffic_calming_post", "leading_pedestrian_interval_post", 
   "enhanced_crossing_post", "speed_humps_post", "street_improvement_project_post", 
   "street_improvement_corridors_post", "signal_retiming_post", "slow_zones_post"
 )
 
-# Find the first year a treatment was applied for each intersection
-first_treatment_year <- sites_ever_treated %>%
+# Identify the first treatment year for each intersection.
+first_treatment_year_df <- sites_ever_treated %>%
   select(intersection_id, year, all_of(treatment_vars)) %>%
   pivot_longer(
     cols = all_of(treatment_vars),
@@ -87,70 +141,122 @@ first_treatment_year <- sites_ever_treated %>%
   ) %>%
   filter(is_treated == 1) %>%
   group_by(intersection_id) %>%
-  summarise(event_year = min(year), .groups = 'drop')
+  summarise(first_treat_year = min(year), .groups = 'drop')
 
-# Merge this event_year back into our main dataset
-sites_with_event_year <- sites_ever_treated %>%
-  left_join(first_treatment_year, by = "intersection_id")
+# Assign intersections to cohorts and set a specific factor order for the legend.
+sites_with_cohorts <- sites_ever_treated %>%
+  left_join(first_treatment_year_df, by = "intersection_id") %>%
+  mutate(
+    cohort = case_when(
+      first_treat_year %in% c(2015, 2016) ~ "Early Adopters (2015-16)",
+      first_treat_year %in% c(2017, 2018, 2019) ~ "Middle Adopters (2017-19)",
+      first_treat_year %in% c(2020, 2021) ~ "Late Adopters (2020-21)",
+      TRUE ~ NA_character_
+    ),
+    cohort = factor(cohort, levels = c("Early Adopters (2015-16)", "Middle Adopters (2017-19)", "Late Adopters (2020-21)"))
+  ) %>%
+  filter(!is.na(cohort))
+
+# Calculate the mean casualties per cohort for each year.
+cohort_trends <- sites_with_cohorts %>%
+  group_by(cohort, year) %>%
+  summarise(
+    mean_casualties = mean(pedestrian_death_or_injury, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Define a consistent color palette for the cohorts.
+cohort_colors <- c(
+  "Early Adopters (2015-16)" = "#00BA38", # Green
+  "Middle Adopters (2017-19)" = "#F8766D", # Red
+  "Late Adopters (2020-21)" = "#619CFF"  # Blue
+)
+
+# Create a helper data frame for the vertical line legends.
+vline_data <- tibble(
+  xintercept = c(2015, 2017, 2020),
+  cohort = factor(c("Early Adopters (2015-16)", "Middle Adopters (2017-19)", "Late Adopters (2020-21)"),
+                  levels = c("Early Adopters (2015-16)", "Middle Adopters (2017-19)", "Late Adopters (2020-21)")),
+  legend_label = factor(c("Treatment Starts (Early)", "Treatment Starts (Middle)", "Treatment Starts (Late)"),
+                        levels = c("Treatment Starts (Early)", "Treatment Starts (Middle)", "Treatment Starts (Late)"))
+)
+
+# Generate the plot.
+ggplot(data = cohort_trends) +
+  geom_line(aes(x = year, y = mean_casualties, color = cohort, group = cohort), linewidth = 1.2) +
+  geom_point(aes(x = year, y = mean_casualties, color = cohort, group = cohort), size = 2.5) +
+  geom_vline(
+    data = vline_data,
+    aes(xintercept = xintercept, color = cohort, linetype = legend_label),
+    alpha = 0.8
+  ) +
+  scale_color_manual(name = "Treatment Cohort", values = cohort_colors) +
+  scale_linetype_manual(name = "Event", values = rep("dashed", 3)) +
+  guides(
+    color = guide_legend(order = 1, title = "Treatment Cohort"),
+    linetype = guide_legend(
+      order = 2, 
+      title = "Event",
+      override.aes = list(color = cohort_colors[levels(vline_data$cohort)])
+    )
+  ) +
+  scale_x_continuous(breaks = seq(min(cohort_trends$year), max(cohort_trends$year), by = 1)) +
+  labs(
+    title = "Average Pedestrian Casualties by Treatment Adoption Cohort",
+    subtitle = "A Visual Check for the Parallel Trends Assumption",
+    x = "Year",
+    y = "Average Annual Casualties per Intersection"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.box = "vertical"
+  )
 ```
 
-### Step 2.2: Create the Relative Time Variable
+### 3.2 Formal Test 1: Global Event Study (Figure 3)
 
-We create the "time to treatment" variable, binning the endpoints for stability, and set `t-1` as the reference period.
+This plot shows the results of a formal event study that aligns all intersections by their first treatment year (`t=0`). It provides a statistical test for differential pre-trends for the average treated intersection in the sample. The non-significance of the pre-treatment coefficients supports the parallel trends assumption.
 
-```{r create_relative_time}
-sites_with_event_year <- sites_with_event_year %>%
+```{r figure_3_global_event_study}
+# Align data in event time relative to the first treatment year.
+sites_with_event_year <- sites_ever_treated %>%
+  left_join(first_treatment_year_df, by = "intersection_id") %>%
   mutate(
-    time_to_treatment = year - event_year,
-    # Bin endpoints: <= -3 becomes -3, >= 3 becomes 3
+    time_to_treatment = year - first_treat_year,
     time_to_treatment_binned = case_when(
+      is.na(time_to_treatment) ~ NA_real_,
       time_to_treatment <= -3 ~ -3,
       time_to_treatment >= 3  ~ 3,
       TRUE ~ time_to_treatment
     ),
-    # Convert to a factor and set the reference level to -1 (the year before treatment)
     time_to_treatment_factor = factor(time_to_treatment_binned)
   )
 
-# Set t-1 as the reference category
+# Set t-1 as the reference category.
 sites_with_event_year$time_to_treatment_factor <- relevel(sites_with_event_year$time_to_treatment_factor, ref = "-1")
-```
 
-### Step 2.3: Run the Global Event Study Regression Model
-
-We replace the 8 individual treatment variables with our new `time_to_treatment_factor`. We keep `speed_limit_post` as a control since it was applied universally outside of our defined "event".
-
-```{r event_study_model}
+# Estimate the global event study model.
 global_event_study_model <- glmmTMB(
   pedestrian_death_or_injury ~ 
-    time_to_treatment_factor + # This replaces the 8 treatment variables
-    speed_limit_post +         # Kept as a control
+    time_to_treatment_factor +
+    speed_limit_post + 
     covid_2020 + 
     scaled_summonses + 
     scaled_traffic_volume + 
     ns(scaled_pop_density, df = 2) +        
-    #scaled_time +   
     (1 | boro_name/ntaname/intersection_id),
   family = nbinom1,
-  data = sites_with_event_year
+  data = sites_with_event_year,
+  na.action = na.omit # Ensure intersections without a first_treat_year are omitted
 ) 
 
-summary(global_event_study_model)
-```
-
-### Step 2.4: Visualize and Interpret the Global Test
-
-We plot the coefficients for `time_to_treatment_factor`. If the confidence intervals for the pre-treatment periods (`-3`, `-2`) overlap with 1.0, it supports the parallel trends assumption.
-
-```{r plot_global_event_study}
-# Extract coefficients using broom::tidy
-event_study_results <- broom::tidy(global_event_study_model, conf.int = TRUE, exponentiate = TRUE) %>%
+# Extract coefficients for plotting.
+event_study_results <- broom.mixed::tidy(global_event_study_model, conf.int = TRUE, exponentiate = TRUE) %>%
   filter(grepl("time_to_treatment_factor", term)) %>%
   mutate(
     relative_time = as.numeric(gsub("time_to_treatment_factor", "", term))
   )
 
-# Add the reference period (t = -1) back in for plotting
 reference_period <- tibble(
   term = "t = -1", estimate = 1, conf.low = 1, conf.high = 1, relative_time = -1
 )
@@ -158,11 +264,26 @@ reference_period <- tibble(
 plot_data <- bind_rows(event_study_results, reference_period) %>%
   arrange(relative_time)
 
-# Create the plot
+# Create a helper data frame for annotations.
+annotation_df <- tibble(
+  x = c(-2, 1.5),
+  y = max(plot_data$conf.high, na.rm = TRUE) * 1.05, 
+  label = c("Pre-Treatment", "Post-Treatment"),
+  color = c("red4", "blue4")
+)
+
+# Generate the plot.
 ggplot(plot_data, aes(x = relative_time, y = estimate)) +
   geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
   geom_vline(xintercept = -0.5, linetype = "dotted", color = "red") +
   geom_pointrange(aes(ymin = conf.low, ymax = conf.high), size = 0.8) +
+  geom_text(
+    data = annotation_df,
+    aes(x = x, y = y, label = label),
+    color = annotation_df$color,
+    fontface = "bold",
+    size = 4.5
+  ) +
   labs(
     title = "Global Event Study: Effect of First VZ Intervention",
     subtitle = "Relative to 1 year prior to treatment (t = -1)",
@@ -170,25 +291,16 @@ ggplot(plot_data, aes(x = relative_time, y = estimate)) +
     y = "Incidence Rate Ratio (IRR)"
   ) +
   scale_x_continuous(breaks = min(plot_data$relative_time):max(plot_data$relative_time)) +
-  annotate("text", x = -2, y = max(plot_data$conf.high, na.rm = TRUE), label = "Pre-Treatment", hjust = 0.5, vjust=1.5, color = "red4", fontface = "bold") +
-  annotate("text", x = 1.5, y = max(plot_data$conf.high, na.rm = TRUE), label = "Post-Treatment", hjust = 0.5, vjust=1.5, color = "blue4", fontface = "bold")
+  coord_cartesian(ylim = c(NA, max(plot_data$conf.high, na.rm = TRUE) * 1.1))
 ```
 
-**Interpretation:** The plot above shows the dynamic effect of receiving *any* first intervention. The key is to examine the points in the pre-treatment period (t=-3, t=-2). If their confidence intervals overlap the horizontal line at 1, there is no statistical evidence of a pre-trend, which supports our assumption.
+### 3.3 Formal Test 2: Intervention-Specific Event Studies (Figure 4)
 
----
+This is our most granular and robust check. It runs nine separate event studies, one for each intervention. Each model uses a "pure" control group of intersections that never received the target treatment. The results are combined into a single multi-panel figure for a comprehensive overview.
 
-## 3. Automated Intervention-Specific Event Studies
-
-To further ensure robustness, this section automates the process of running a controlled event study for each of the nine VZ interventions. This approach isolates the pre-trends for a single target intervention by including all other interventions as binary control variables in the model. The code below defines a function and then loops through each intervention, generating a regression summary and an event study plot for each.
-
-```{r intervention_specific_loop, results='asis', fig.height=5, fig.width=8}
-# 'results="asis"' is important for knitting, as it allows the cat() function
-# to properly render headers in the final HTML document.
-
-# --- Function Definition ---
-run_event_study_for_intervention <- function(data, target_intervention) {
-  
+```{r figure_4_multi_panel_event_study}
+# Define the function to create a single, panel-friendly plot.
+run_event_study_for_panel <- function(data, target_intervention) {
   all_interventions <- c(
     "turn_traffic_calming_post", "leading_pedestrian_interval_post", 
     "enhanced_crossing_post", "speed_humps_post", "street_improvement_project_post", 
@@ -196,14 +308,11 @@ run_event_study_for_intervention <- function(data, target_intervention) {
     "speed_limit_post" 
   )
   control_interventions <- setdiff(all_interventions, target_intervention)
-  
   event_year_df <- data %>%
     filter(.data[[target_intervention]] == 1) %>%
     group_by(intersection_id) %>%
     summarise(event_year = min(year), .groups = 'drop')
-  
   if (nrow(event_year_df) == 0) return(NULL)
-  
   analysis_data <- data %>%
     left_join(event_year_df, by = "intersection_id") %>%
     mutate(
@@ -214,132 +323,107 @@ run_event_study_for_intervention <- function(data, target_intervention) {
         time_to_treatment >= 3  ~ 3,
         TRUE ~ time_to_treatment
       ),
-      time_to_treatment_factor = factor(time_to_treatment_binned)
+      time_to_treatment_factor = factor(time_to_treatment_binned),
+      time_to_treatment_factor = forcats::fct_explicit_na(time_to_treatment_factor, na_level = "Control")
     )
-  
-  if (any(!is.na(analysis_data$time_to_treatment_factor))) {
+  if (any(analysis_data$time_to_treatment_factor != "Control")) {
     analysis_data$time_to_treatment_factor <- relevel(analysis_data$time_to_treatment_factor, ref = "-1")
   } else {
     return(NULL)
   }
-  
   model_formula <- as.formula(
     paste(
       "pedestrian_death_or_injury ~ time_to_treatment_factor +",
       paste(control_interventions, collapse = " + "),
-      "+ covid_2020 + scaled_summonses + scaled_traffic_volume + ns(scaled_pop_density, df = 2) + (1 | boro_name/ntaname/intersection_id)"
+      "+ covid_2020 + scaled_summonses + scaled_traffic_volume + ns(scaled_pop_density, df = 2)",
+      "+ (1 | boro_name/ntaname/intersection_id)"
     )
   )
-  
-  # Use tryCatch to prevent the loop from stopping if a model fails to converge
   event_model <- tryCatch({
     glmmTMB(model_formula, family = nbinom1, data = analysis_data)
   }, error = function(e) {
     message(paste("Model for", target_intervention, "failed to converge:", e$message))
     return(NULL)
   })
-
   if (is.null(event_model)) return(NULL)
-  
-  results <- broom::tidy(event_model, conf.int = TRUE, exponentiate = TRUE) %>%
-    filter(grepl("time_to_treatment_factor", term)) %>%
+  results <- broom.mixed::tidy(event_model, conf.int = TRUE, exponentiate = TRUE) %>%
+    filter(grepl("time_to_treatment_factor", term) & !grepl("Control", term)) %>%
     mutate(
       relative_time = as.numeric(gsub("time_to_treatment_factor", "", term))
     )
-  
   reference_period <- tibble(
     term = "t = -1", estimate = 1, conf.low = 1, conf.high = 1, relative_time = -1
   )
-  
   plot_data <- bind_rows(results, reference_period) %>%
     arrange(relative_time)
-  
   plot_title <- toTitleCase(gsub("_post", "", target_intervention))
   plot_title <- gsub("_", " ", plot_title)
   
   p <- ggplot(plot_data, aes(x = relative_time, y = estimate)) +
     geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
     geom_vline(xintercept = -0.5, linetype = "dotted", color = "red") +
-    geom_pointrange(aes(ymin = conf.low, ymax = conf.high), size = 0.8) +
+    geom_pointrange(aes(ymin = conf.low, ymax = conf.high), size = 0.5) +
     labs(
-      title = paste("Event Study for:", plot_title),
-      subtitle = "Relative to 1 year prior to treatment (t = -1), controlling for other interventions",
-      x = "Years Relative to Intervention",
-      y = "Incidence Rate Ratio (IRR)"
+      title = plot_title, 
+      x = NULL,
+      y = NULL
     ) +
-    scale_x_continuous(breaks = min(plot_data$relative_time):max(plot_data$relative_time))
-  
-  return(list(model = event_model, plot = p, title = plot_title))
+    scale_x_continuous(breaks = seq(min(plot_data$relative_time, na.rm=TRUE), max(plot_data$relative_time, na.rm=TRUE), by=2)) +
+    theme_minimal(base_size = 9)
+    
+  return(p)
 }
 
-# --- The Loop ---
-
-# IMPORTANT: Verify these variable names match the column names in your dataframe.
+# Define the list of interventions to loop through.
 interventions_to_test <- c(
   "slow_zones_post",
   "turn_traffic_calming_post",
   "speed_humps_post",
-  "speed_limit_post",
   "street_improvement_corridors_post",
   "signal_retiming_post",
   "leading_pedestrian_interval_post",
   "enhanced_crossing_post",
-  "street_improvement_project_post" 
+  "street_improvement_project_post",
+  "speed_limit_post"
 )
 
-# Loop through each intervention and print its results
+# Initialize an empty list to store the plots.
+panel_plots <- list()
+
+# Loop through each intervention, run the model, and store the resulting plot.
+cat("--- Running intervention-specific event studies and collecting plots... ---\n")
 for (intervention in interventions_to_test) {
-  
-  results <- run_event_study_for_intervention(sites_ever_treated, intervention)
-  
-  if (!is.null(results)) {
-    cat("\n\n### Results for: ", results$title, "\n")
-    
-    cat("\n#### Regression Model Summary\n\n")
-    print(summary(results$model))
-    
-    cat("\n\n#### Event Study Plot\n\n")
-    print(results$plot)
-    
-  } else {
-    title_name <- toTitleCase(gsub("_post|_", " ", intervention))
-    cat("\n\n### Results for: ", title_name, "\n\n")
-    cat("Analysis could not be completed. This is likely due to an insufficient number of treated intersections or a model convergence failure.\n")
-  }
+  cat("  - Running for:", intervention, "\n")
+  panel_plots[[intervention]] <- run_event_study_for_panel(sites_ever_treated, intervention)
 }
+cat("--- All plots collected. ---\n")
+
+
+# Assemble the final multi-panel figure using the patchwork package.
+multi_panel_figure <- wrap_plots(panel_plots, ncol = 3)
+
+final_figure <- multi_panel_figure +
+  plot_annotation(
+    title = "Intervention-Specific Event Study Analyses",
+    subtitle = "All estimates are relative to 1 year prior to treatment (t = -1)",
+    tag_levels = 'a' 
+  ) &
+  theme(
+    plot.title = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    plot.tag = element_text(size = 8, face = "bold")
+  )
+
+# Add common axis labels to the combined figure.
+final_figure_with_axes <- wrap_elements(panel = final_figure) +
+  labs(x = "Years Relative to Intervention", y = "Incidence Rate Ratio (IRR)") +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+# Display the final, combined figure.
+print(final_figure_with_axes)
 ```
-
-## 4. Conclusion and Reporting
-
-After running these tests, you can summarize the findings in your manuscript.
-
-**If the assumption generally holds:**
-> "To validate our staggered difference-in-difference design, we tested the parallel trends assumption using a series of event study models. First, a global test confirmed no significant pre-existing trends for intersections leading up to their first intervention. Second, we conducted intervention-specific tests for each of the nine treatments. For the majority of interventions, the coefficients for the pre-treatment periods were not statistically different from one, indicating no evidence of differential pre-existing trends (see Appendix Figures X-Y). This supports the validity of our research design."
-
-**If an assumption is violated for a specific intervention (e.g., Signal Retiming):**
-> "...However, for the '25 MPH Signal Retiming' intervention, we observed a statistically significant upward trend in pedestrian casualties in the years prior to implementation. This suggests that this intervention may have been targeted at corridors with already worsening safety records. While our model includes nested random effects to control for baseline heterogeneity, this finding should be considered a limitation. The positive association found for signal retiming in our main analysis may be partially confounded by this pre-existing trend, and thus should be interpreted with caution."
-
-### Optional: Save All Plots to a PDF Appendix
-
-The following code will save all 9 intervention-specific plots to a single PDF file, which is perfect for an appendix.
-
-```{r save_plots_pdf, eval=FALSE}
-# Create a PDF file
-pdf("appendix_event_study_plots.pdf", width = 8.5, height = 6)
-
-# Loop through the list of plots and print each one to the PDF
-for (trt in treatment_list) {
-  print(event_study_plots[[trt]])
-}
-
-# Close the PDF device
-dev.off()
-
-print("All plots saved to appendix_event_study_plots.pdf")
-```
-
-
-
 
 
 
