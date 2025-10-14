@@ -1,17 +1,5 @@
----
-title: "PTA Analyses for NYC Vision Zero Study"
-author: "Your Name"
-date: "`r Sys.Date()`"
-output:
-  html_document:
-    toc: true
-    toc_float: true
-    theme: united
-    code_folding: show
----
 
 ```{r setup, include=FALSE}
-# This chunk sets up the R environment for the analysis.
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
@@ -25,8 +13,6 @@ This document provides the additional analyses and diagnostic checks for the man
 All analyses are conducted using the final analytic dataset as described in the main paper.
 
 ## 1. Data Loading and Preparation
-
-This initial step loads all necessary R packages and prepares the analytic dataset. This includes loading the data and scaling continuous predictor variables as specified in the main model.
 
 ```{r data_load_and_prep}
 # Load all required libraries for the entire analysis
@@ -71,7 +57,7 @@ print("Data loaded and prepared successfully.")
 
 ## 2. Overall Trend in Pedestrian Casualties (Figure 1)
 
-This section generates Figure 1, which displays the total number of annual pedestrian casualties within our analytic sample from 2013 to 2023. This plot provides context for the overall trend in the outcome variable during the study period. A Mann-Kendall test is performed to formally test for a monotonic trend.
+This section generates Figure 1, which displays the total number of annual pedestrian casualties within our analytic sample from 2013 to 2023. A Mann-Kendall test is performed to formally test for a monotonic trend.
 
 ```{r figure_1_total_casualties}
 # Summarize the data by year, calculating the sum of casualties.
@@ -121,7 +107,7 @@ This section contains the three diagnostic checks for the parallel trends assump
 
 ### 3.1 Visual Check by Treatment Cohort (Figure 2)
 
-This plot provides an intuitive, descriptive check of the assumption. It groups intersections by their first treatment year and plots their average raw casualty trends over calendar time. Parallel movement of the lines prior to their respective treatment start dates provides visual support for the assumption.
+This plot provides a descriptive check of the assumption. It groups intersections by their first treatment year and plots their average raw casualty trends over calendar time. Parallel movement of the lines prior to their respective treatment start dates provides visual support for the assumption.
 
 ```{r figure_2_cohort_plot}
 # Define the non-universal treatment variables.
@@ -296,7 +282,7 @@ ggplot(plot_data, aes(x = relative_time, y = estimate)) +
 
 ### 3.3 Formal Test 2: Intervention-Specific Event Studies (Figure 4)
 
-This is our most granular and robust check. It runs nine separate event studies, one for each intervention. Each model uses a "pure" control group of intersections that never received the target treatment. The results are combined into a single multi-panel figure for a comprehensive overview.
+This is our most robust check. It runs nine separate event studies, one for each intervention. Each model uses a "pure" control group of intersections that never received the target treatment. The results are combined into a single multi-panel figure for a comprehensive overview.
 
 ```{r figure_4_multi_panel_event_study}
 # Define the function to create a single, panel-friendly plot.
@@ -429,9 +415,6 @@ print(final_figure_with_axes)
 
 
 
-```{r}
-geo_data <- read_csv('../data/output/intersection_intervention_table_final_w_geo.csv', show_col_types = FALSE)
-```
 
 
 
