@@ -160,6 +160,10 @@ testOutliers(sim_res_sl_2) # outliers
 check_collinearity(model_w_sl_2)
 ```
 
+----------------------------------------------------------------------------------------
+
+# BELOW MODELS ARE NOT INCLUDED IN PAPER!
+
 # Mode: 2013-2023, ONLY speed limit treatments
 
 ```{r}
