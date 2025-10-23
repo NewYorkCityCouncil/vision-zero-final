@@ -99,6 +99,56 @@ ggplot(yearly_totals, aes(x = year, y = total_casualties)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+```{r}
+# Load the main analytic dataset
+file_path <- '../data/output/intersection_intervention_table_final.csv'
+
+if (!file.exists(file_path)) {
+  stop("Data file not found. Please check the path in the 'file_path' variable.")
+}
+
+full_data <- read_csv(file_path, show_col_types = FALSE)
+
+# Summarize the data by year, calculating the sum of casualties.
+yearly_totals <- full_data %>%
+  group_by(year) %>%
+  summarise(
+    total_casualties = sum(pedestrian_death_or_injury, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  filter(year != 2024)
+
+# Perform a Mann-Kendall trend test on the time series of total casualties.
+mk_test_result_total <- MannKendall(yearly_totals$total_casualties)
+
+# Format the p-value for display on the plot.
+p_value_total <- mk_test_result_total$sl
+if (p_value_total < 0.001) {
+  p_text_total <- "Mann-Kendall p < 0.001"
+} else {
+  p_text_total <- sprintf("Mann-Kendall p = %.3f", p_value_total)
+}
+
+# Generate the plot.
+ggplot(yearly_totals, aes(x = year, y = total_casualties)) +
+  geom_line(linewidth = 1.2, color = "darkred") +
+  geom_point(size = 3, color = "darkred") +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", color = "black", linewidth = 0.8) +
+  geom_vline(xintercept = 2014.5, linetype = "dashed", color = "darkgreen", alpha = 0.7) +
+  annotate("text", x = 2014.5, y = max(yearly_totals$total_casualties), 
+           label = "Vision Zero Begins", hjust = -0.1, size = 3.5, color = "darkgreen") +
+  annotate("text", x = max(yearly_totals$year), y = max(yearly_totals$total_casualties), 
+           label = p_text_total, hjust = 1.1, vjust = 1.5, size = 4, color = "black", fontface = "italic") +
+  scale_x_continuous(breaks = seq(min(yearly_totals$year), max(yearly_totals$year), by = 1)) +
+  labs(
+    title = "Total Annual Pedestrian Casualties in NYC",
+    subtitle = "Showing the unadjusted citywide trend from 2013 to 2023",
+    x = "Year",
+    y = "Total Annual Pedestrian Casualties"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 ---
 
 ## 3. Parallel Trends Assumption Checks
