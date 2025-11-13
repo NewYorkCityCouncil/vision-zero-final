@@ -1,0 +1,624 @@
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(glmmTMB)
+library(DHARMa)
+library(effects)
+library(performance)
+library(purrr)
+library(furrr)
+library(splines)
+library(future.apply)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(plotly) 
+library(ggeffects)
+```
+
+# Uploading and Preparing the Data
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+# Model - Year as a categorical variable
+
+```{r}
+# convert year to categorical
+sites_ever_treated$year <- as.factor(sites_ever_treated$year)
+
+# one spline for scaled_pop_density
+model_spline <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    year +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+summary(model_spline)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Tidy the model output. This will automatically handle the NA coefficients.
+irr_results_tidy <- tidy(model_spline, 
+                         conf.int = TRUE,      # Calculate confidence intervals
+                         exponentiate = TRUE,  # Exponentiate to get IRRs
+                         effects = "fixed") %>% # Only show fixed effects
+                   select(term, estimate, conf.low, conf.high, p.value) # Optional: reorder
+
+# Print the clean results table
+print(irr_results_tidy)
+```
+
+```{r}
+# visualizing results
+
+# extract fixed effect estimates and standard errors 
+coef_point_estimates <- fixef(model_spline)$cond
+model_vcov <- vcov(model_spline)$cond
+model_se <- sqrt(diag(model_vcov))
+
+# compute z-scores and two-tailed p-values
+z_scores <- coef_point_estimates / model_se
+p_values_model <- 2 * (1 - pnorm(abs(z_scores)))
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  #"scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", # can't be interpreted in the same way as the other coefficients
+  # "ns(scaled_pop_density, df = 2)2",
+  #"scaled_traffic_volume",
+  #"scaled_summonses",
+  #"covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# add significance indicator
+percent_change_df <- percent_change_df %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant")
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% Bootstrap CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Point estimates from model_dispformula; cluster-robust bootstrap SEs and CIs",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+
+```
+
+```{r}
+# after introducing new terms, is there multicollinearity?
+
+# very high
+
+check_collinearity(model_spline)
+```
+
+```{r}
+# diagnostics
+# cannot do because of NA coefficients 
+sim_res_spline <- simulateResiduals(fittedModel = model_spline, n = 500, plot = TRUE)
+testZeroInflation(sim_res_spline) # zero-inflation test
+testDispersion(sim_res_spline) # dispersion test
+testUniformity(sim_res_spline) # KS test
+testOutliers(sim_res_spline) # outliers
+```
+
+# There is a big change in speed limit post (significantly negative -> significantly positive), slow zones (significantly negative -> non significant), and signal retiming (significantly positive -> non significant).
+
+
+
+
+
+
+
+
+
+
+
+# Model - Year as a categorical variable, taking out all other time dependent effects
+
+```{r}
+# convert year to categorical
+sites_ever_treated$year <- as.factor(sites_ever_treated$year)
+
+# one spline for scaled_pop_density
+model_spline <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    #covid_2020 + 
+    #scaled_summonses + 
+    #scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    year +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = nbinom1,
+  data = sites_ever_treated
+) 
+
+summary(model_spline)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Tidy the model output. This will automatically handle the NA coefficients.
+irr_results_tidy <- tidy(model_spline, 
+                         conf.int = TRUE,      # Calculate confidence intervals
+                         exponentiate = TRUE,  # Exponentiate to get IRRs
+                         effects = "fixed") %>% # Only show fixed effects
+                   select(term, estimate, conf.low, conf.high, p.value) # Optional: reorder
+
+# Print the clean results table
+print(irr_results_tidy)
+```
+
+```{r}
+# visualizing results
+
+# extract fixed effect estimates and standard errors 
+coef_point_estimates <- fixef(model_spline)$cond
+model_vcov <- vcov(model_spline)$cond
+model_se <- sqrt(diag(model_vcov))
+
+# compute z-scores and two-tailed p-values
+z_scores <- coef_point_estimates / model_se
+p_values_model <- 2 * (1 - pnorm(abs(z_scores)))
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  #"scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", # can't be interpreted in the same way as the other coefficients
+  # "ns(scaled_pop_density, df = 2)2",
+  #"scaled_traffic_volume",
+  #"scaled_summonses",
+  #"covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# add significance indicator
+percent_change_df <- percent_change_df %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant")
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% Bootstrap CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Point estimates from model_dispformula; cluster-robust bootstrap SEs and CIs",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+
+```
+
+```{r}
+# after removing terms, is there multicollinearity?
+
+# very high for speed limit - this is probably what's causing the issue
+
+check_collinearity(model_spline)
+```
+
+```{r}
+# diagnostics
+sim_res_spline <- simulateResiduals(fittedModel = model_spline, n = 500, plot = TRUE)
+testZeroInflation(sim_res_spline) # zero-inflation test
+testDispersion(sim_res_spline) # dispersion test
+testUniformity(sim_res_spline) # KS test
+testOutliers(sim_res_spline) # outliers
+AIC(model_spline)
+BIC(model_spline)
+```
+
+# No imporvement for any diagnostic measure, if anythinng some got even more significant
+# Worse AIC and BIC too
+
+# There is a big change in speed limit post (significantly negative -> significantly positive), slow zones (significantly negative -> non significant), and signal retiming (significantly positive -> non significant).
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Model - Poisson version, all else held equal
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+```{r}
+# one spline for scaled_pop_density
+model_spline <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = poisson,
+  data = sites_ever_treated
+) 
+
+summary(model_spline)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Tidy the model output. This will automatically handle the NA coefficients.
+irr_results_tidy <- tidy(model_spline, 
+                         conf.int = TRUE,      # Calculate confidence intervals
+                         exponentiate = TRUE,  # Exponentiate to get IRRs
+                         effects = "fixed") %>% # Only show fixed effects
+                   select(term, estimate, conf.low, conf.high, p.value) # Optional: reorder
+
+# Print the clean results table
+print(irr_results_tidy)
+```
+
+```{r}
+# visualizing results
+
+# extract fixed effect estimates and standard errors 
+coef_point_estimates <- fixef(model_spline)$cond
+model_vcov <- vcov(model_spline)$cond
+model_se <- sqrt(diag(model_vcov))
+
+# compute z-scores and two-tailed p-values
+z_scores <- coef_point_estimates / model_se
+p_values_model <- 2 * (1 - pnorm(abs(z_scores)))
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  #"scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", # can't be interpreted in the same way as the other coefficients
+  # "ns(scaled_pop_density, df = 2)2",
+  #"scaled_traffic_volume",
+  #"scaled_summonses",
+  #"covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# add significance indicator
+percent_change_df <- percent_change_df %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant")
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% Bootstrap CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Point estimates from model_dispformula; cluster-robust bootstrap SEs and CIs",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+
+```
+
+```{r}
+# is there multicollinearity?
+
+# no issues
+
+check_collinearity(model_spline)
+```
+
+```{r}
+# diagnostics
+
+sim_res_spline <- simulateResiduals(fittedModel = model_spline, n = 500, plot = TRUE)
+testZeroInflation(sim_res_spline) # zero-inflation test
+testDispersion(sim_res_spline) # dispersion test
+testUniformity(sim_res_spline) # KS test
+testOutliers(sim_res_spline) # outliers
+AIC(model_spline)
+BIC(model_spline)
+```
+
+# Same exact results
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
