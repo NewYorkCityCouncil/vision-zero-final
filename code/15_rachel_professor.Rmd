@@ -15,6 +15,7 @@ library(furrr)
 library(splines)
 library(future.apply)
 library(broom)
+library(broom.mixed)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -199,7 +200,7 @@ p
 ```
 
 ```{r}
-# after introducing new terms, is there multicollinearity?
+# after introducing new term, is there multicollinearity?
 
 # very high
 
@@ -605,6 +606,600 @@ BIC(model_spline)
 ```
 
 # Same exact results
+
+
+
+
+
+
+
+
+
+
+# Model - Linear version, all else held equal
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+```{r}
+# one spline for scaled_pop_density
+model_linear <- glmmTMB(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time +   
+    (1 | boro_name/ntaname/intersection_id),
+  family = gaussian,
+  data = sites_ever_treated
+) 
+
+summary(model_linear)
+```
+
+```{r}
+# visualize the linear model
+
+library(plotly)
+library(dplyr)
+library(glmmTMB)
+
+# 1. Run the Linear Model (if not already in your environment)
+# model_linear <- glmmTMB(
+#   pedestrian_death_or_injury ~ 
+#     turn_traffic_calming_post +
+#     leading_pedestrian_interval_post +
+#     enhanced_crossing_post +
+#     speed_humps_post +
+#     street_improvement_project_post +
+#     street_improvement_corridors_post +
+#     signal_retiming_post +
+#     slow_zones_post +
+#     speed_limit_post +
+#     covid_2020 + 
+#     scaled_summonses + 
+#     scaled_traffic_volume + 
+#     ns(scaled_pop_density, df = 2) +        
+#     scaled_time +   
+#     (1 | boro_name/ntaname/intersection_id),
+#   family = gaussian(),
+#   data = sites_ever_treated
+# )
+
+# 2. Extract fixed effect estimates and standard errors 
+coef_point_estimates <- fixef(model_linear)$cond
+model_vcov <- vcov(model_linear)$cond
+model_se <- sqrt(diag(model_vcov))
+
+# 3. Compute z-scores and p-values
+z_scores <- coef_point_estimates / model_se
+p_values_model <- 2 * (1 - pnorm(abs(z_scores)))
+
+# 4. Compute confidence intervals (Raw Additive Scale)
+# No exponentiation here
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# 5. Define custom order
+custom_order <- c(
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# 6. Create plotting data frame
+# Using raw estimates instead of percent change
+plot_df <- data.frame(
+  term = names(coef_point_estimates),
+  estimate = coef_point_estimates,
+  lower_ci = ci_lower,
+  upper_ci = ci_upper,
+  p_value = p_values_model
+) %>%
+  # Filter to only include the specific terms of interest
+  filter(term %in% custom_order) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# 7. Create Interactive Plotly Chart
+p <- plot_ly(data = plot_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~estimate,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "<b>Term:</b> ", term, "<br>",
+      "<b>Estimate:</b> ", round(estimate, 4), "<br>",
+      "<b>95% CI:</b> (", round(lower_ci, 4), ", ", round(upper_ci, 4), ")<br>",
+      "<b>p-value:</b> ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries (Linear Model)",
+    subtitle = "Additive Fixed Effects (Gaussian family)",
+    xaxis = list(
+      title = "Additive Effect on Outcome", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', # The null line at 0
+      zerolinewidth = 2
+    ),
+    yaxis = list(
+      title = "", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red"),
+    margin = list(l = 150) # Margin for variable names
+  )
+
+# Show the plot
+p
+```
+
+```{r}
+# is there multicollinearity?
+
+# no issues
+
+check_collinearity(model_linear)
+```
+
+# Some coefficients lose or gain significane (speed humps, SIP corridors, and signal retiming become non-significant, LPI becomes significant and negative), but no reversals from significant increase/decrease to singificant decrease/increase.
+# Some inconsistencies are to be expected due to differences between model types.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Model - Random effects as fixed instead
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+```{r}
+# Install if needed
+if (!require("fixest")) install.packages("fixest")
+library(fixest)
+
+# Run Fixed Effects Negative Binomial
+model_fixed <- fenegbin(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    # Note: remove boro and nta because they are invariant within an intersection
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time | 
+    intersection_id,
+  data = sites_ever_treated
+)
+
+summary(model_fixed)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Load broom (fixest works with broom automatically)
+library(broom)
+
+# Tidy the model output
+# fixest automatically clusters SEs by the fixed effect (intersection_id)
+irr_results_tidy <- tidy(model_fixed, 
+                         conf.int = TRUE,      # Calculate confidence intervals
+                         exponentiate = TRUE,  # Exponentiate to get IRRs
+                         se = "cluster") %>%   # Explicitly request clustered SEs
+                   select(term, estimate, conf.low, conf.high, p.value)
+
+# Print the clean results table
+print(irr_results_tidy)
+```
+
+```{r}
+# visualizing results
+library(plotly)
+library(dplyr)
+library(fixest)
+
+# --- FIX: Extraction method ---
+# We extract from the summary table to ensure row counts match (ignoring theta)
+# se = "cluster" ensures we use the clustered SEs you requested
+model_summary <- summary(model_fixed, se = "cluster")$coeftable
+
+# Extract columns by index to be safe (1=Est, 2=SE, 4=Pval)
+coef_point_estimates <- model_summary[, 1]
+model_se <- model_summary[, 2]
+p_values_model <- model_summary[, 4]
+
+# compute z-scores (Optional, since p-values are already extracted above, but good for checking)
+z_scores <- coef_point_estimates / model_se
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  #"scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", 
+  # "ns(scaled_pop_density, df = 2)2",
+  #"scaled_traffic_volume",
+  #"scaled_summonses",
+  #"covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+# Using names(coef_point_estimates) works now because we extracted from the aligned table
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  # Filter to only include terms in the custom order
+  filter(term %in% custom_order) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Fixed Effects Negative Binomial; SEs clustered by Intersection",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+```
+
+# Speed humps and SIP corridors go from negative and significant to negative and non-significant. Signal retiming goes from positive and significant to non-significant.  LPI goes from non significant to negative and significant. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Model - Random effects as fixed instead, year as categorical (have to remove all other covariates, else no CIs can be calculated)
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+
+# convert year to categorical
+sites_ever_treated$year <- as.factor(sites_ever_treated$year)
+```
+
+```{r}
+# Install if needed
+if (!require("fixest")) install.packages("fixest")
+library(fixest)
+
+# Run Fixed Effects Negative Binomial
+model_fixed <- fenegbin(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    #covid_2020 + 
+    #scaled_summonses + 
+    #scaled_traffic_volume + 
+    # Note: remove boro and nta because they are invariant within an intersection
+    ns(scaled_pop_density, df = 2) +        
+    year | 
+    intersection_id,
+  data = sites_ever_treated
+)
+
+summary(model_fixed)
+```
+
+```{r}
+# exploring model_spline since it is the final chosen model
+
+# Load broom (fixest works with broom automatically)
+library(broom)
+
+# Tidy the model output
+# fixest automatically clusters SEs by the fixed effect (intersection_id)
+irr_results_tidy <- tidy(model_fixed, 
+                         conf.int = TRUE,      # Calculate confidence intervals
+                         exponentiate = TRUE,  # Exponentiate to get IRRs
+                         se = "cluster") %>%   # Explicitly request clustered SEs
+                   select(term, estimate, conf.low, conf.high, p.value)
+
+# Print the clean results table
+print(irr_results_tidy)
+```
+
+```{r}
+# visualizing results
+library(plotly)
+library(dplyr)
+library(fixest)
+
+# --- FIX: Extraction method ---
+# We extract from the summary table to ensure row counts match (ignoring theta)
+# se = "cluster" ensures we use the clustered SEs you requested
+model_summary <- summary(model_fixed, se = "cluster")$coeftable
+
+# Extract columns by index to be safe (1=Est, 2=SE, 4=Pval)
+coef_point_estimates <- model_summary[, 1]
+model_se <- model_summary[, 2]
+p_values_model <- model_summary[, 4]
+
+# compute z-scores (Optional, since p-values are already extracted above, but good for checking)
+z_scores <- coef_point_estimates / model_se
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  #"year",
+  # "ns(scaled_pop_density, df = 2)1", 
+  # "ns(scaled_pop_density, df = 2)2",
+  #"scaled_traffic_volume",
+  #"scaled_summonses",
+  #"covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+# Using names(coef_point_estimates) works now because we extracted from the aligned table
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  # Filter to only include terms in the custom order
+  filter(term %in% custom_order) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Fixed Effects Negative Binomial; SEs clustered by Intersection",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 

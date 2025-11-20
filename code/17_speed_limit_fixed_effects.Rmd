@@ -1,0 +1,178 @@
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(glmmTMB)
+library(DHARMa)
+library(effects)
+library(performance)
+library(purrr)
+library(furrr)
+library(splines)
+library(future.apply)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(plotly) 
+library(ggeffects)
+library(broom.mixed)
+library(fixest)
+```
+
+# Mode: 2013-2016, no non-speed limit treatments
+
+```{r}
+ever_treated_w_sl_2013_2016 <- read_csv('../data/output/intersection_intervention_table_untreated_2013-2016.csv')
+ever_treated_w_sl_2013_2016 <- ever_treated_w_sl_2013_2016 %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+
+model_w_sl_fixed <- fepois(
+  pedestrian_death_or_injury ~ 
+    # turn_traffic_calming_post +
+    # leading_pedestrian_interval_post +
+    # enhanced_crossing_post +
+    # speed_humps_post +
+    # street_improvement_project_post +
+    # street_improvement_corridors_post +
+    # signal_retiming_post +
+    # slow_zones_post +
+    speed_limit_post +
+    #covid_2020 + 
+    #scaled_summonses + 
+    #scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time + 
+    source  | 
+    intersection_id,
+  data = ever_treated_w_sl_2013_2016
+) 
+
+summary(model_w_sl_fixed)
+```
+
+```{r}
+# explore
+library(broom)
+
+results_table <- tidy(model_w_sl_fixed, 
+                      conf.int = TRUE, 
+                      conf.level = 0.95, 
+                      se = "cluster") %>% # Ensure SEs are clustered
+                 mutate(
+                   IRR = exp(estimate),
+                   CI_Low_95 = exp(conf.low),
+                   CI_High_95 = exp(conf.high)
+                 ) %>%
+                 select(term, IRR, CI_Low_95, CI_High_95, p.value)
+
+print(results_table)
+```
+
+```{r}
+performance::check_collinearity(model_w_sl_fixed)
+```
+
+# Mode: 2013-2023, no non-speed limit treatments
+
+```{r}
+ever_treated_w_sl_2013_2023 <- read_csv('../data/output/intersection_intervention_table_untreated_2013-2023.csv')
+ever_treated_w_sl_2013_2023 <- ever_treated_w_sl_2013_2023 %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+
+model_w_sl_fixed_2 <- fepois(
+  pedestrian_death_or_injury ~ 
+    # turn_traffic_calming_post +
+    # leading_pedestrian_interval_post +
+    # enhanced_crossing_post +
+    # speed_humps_post +
+    # street_improvement_project_post +
+    # street_improvement_corridors_post +
+    # signal_retiming_post +
+    # slow_zones_post +
+    speed_limit_post +
+    #covid_2020 + 
+    #scaled_summonses + 
+    #scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time + 
+    source  | 
+    intersection_id,
+  data = ever_treated_w_sl_2013_2016
+) 
+
+summary(model_w_sl_fixed_2)
+```
+
+```{r}
+# explore
+library(broom)
+
+results_table <- tidy(model_w_sl_fixed_2, 
+                      conf.int = TRUE, 
+                      conf.level = 0.95, 
+                      se = "cluster") %>% # Ensure SEs are clustered
+                 mutate(
+                   IRR = exp(estimate),
+                   CI_Low_95 = exp(conf.low),
+                   CI_High_95 = exp(conf.high)
+                 ) %>%
+                 select(term, IRR, CI_Low_95, CI_High_95, p.value)
+
+print(results_table)
+```
+
+```{r}
+check_collinearity(model_w_sl_fixed_2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

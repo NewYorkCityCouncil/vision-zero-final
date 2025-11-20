@@ -28,6 +28,9 @@ library(forcats)
 library(patchwork)
 library(kableExtra) 
 library(Kendall)
+library(fixest)
+library(stringr)
+library(dplyr)
 
 # Set a consistent global theme for all plots
 theme_set(theme_minimal(base_size = 14))
@@ -271,27 +274,42 @@ sites_with_event_year <- sites_ever_treated %>%
 # Set t-1 as the reference category.
 sites_with_event_year$time_to_treatment_factor <- relevel(sites_with_event_year$time_to_treatment_factor, ref = "-1")
 
-# Estimate the global event study model.
-global_event_study_model <- glmmTMB(
+# Estimate the global event study model using Fixed Effects Negative Binomial
+global_event_study_model <- fenegbin(
   pedestrian_death_or_injury ~ 
     time_to_treatment_factor +
     speed_limit_post + 
     covid_2020 + 
     scaled_summonses + 
     scaled_traffic_volume + 
-    ns(scaled_pop_density, df = 2) +        
-    (1 | boro_name/ntaname/intersection_id),
-  family = nbinom1,
-  data = sites_with_event_year,
-  na.action = na.omit # Ensure intersections without a first_treat_year are omitted
+    ns(scaled_pop_density, df = 2) |
+    intersection_id, # Fixed Effect
+  data = sites_with_event_year
 ) 
 
-# Extract coefficients for plotting.
-event_study_results <- broom.mixed::tidy(global_event_study_model, conf.int = TRUE, exponentiate = TRUE) %>%
+# --- Extraction Logic for fixest ---
+# Use the summary table to ensure clean extraction of clustered SEs
+model_summary <- summary(global_event_study_model, se = "cluster")$coeftable
+
+# Convert to dataframe
+results_df <- data.frame(
+  term = rownames(model_summary),
+  estimate = model_summary[, 1],
+  std_error = model_summary[, 2]
+)
+
+# Process results for plotting
+event_study_results <- results_df %>%
   filter(grepl("time_to_treatment_factor", term)) %>%
   mutate(
+    # Calculate CIs and IRRs
+    conf.low = exp(estimate - 1.96 * std_error),
+    conf.high = exp(estimate + 1.96 * std_error),
+    estimate = exp(estimate),
+    # Extract numeric time
     relative_time = as.numeric(gsub("time_to_treatment_factor", "", term))
-  )
+  ) %>%
+  select(term, estimate, conf.low, conf.high, relative_time)
 
 reference_period <- tibble(
   term = "t = -1", estimate = 1, conf.low = 1, conf.high = 1, relative_time = -1
@@ -335,8 +353,9 @@ ggplot(plot_data, aes(x = relative_time, y = estimate)) +
 This is our most robust check. It runs nine separate event studies, one for each intervention. Each model uses a "pure" control group of intersections that never received the target treatment. The results are combined into a single multi-panel figure for a comprehensive overview.
 
 ```{r figure_4_multi_panel_event_study}
-# Define the function to create a single, panel-friendly plot.
+# Define the function
 run_event_study_for_panel <- function(data, target_intervention) {
+  
   all_interventions <- c(
     "turn_traffic_calming_post", "leading_pedestrian_interval_post", 
     "enhanced_crossing_post", "speed_humps_post", "street_improvement_project_post", 
@@ -344,73 +363,137 @@ run_event_study_for_panel <- function(data, target_intervention) {
     "speed_limit_post" 
   )
   control_interventions <- setdiff(all_interventions, target_intervention)
+  
+  # 1. Identify event years
   event_year_df <- data %>%
     filter(.data[[target_intervention]] == 1) %>%
     group_by(intersection_id) %>%
     summarise(event_year = min(year), .groups = 'drop')
+  
   if (nrow(event_year_df) == 0) return(NULL)
+  
+  # 2. Prepare Data
   analysis_data <- data %>%
     left_join(event_year_df, by = "intersection_id") %>%
     mutate(
       time_to_treatment = year - event_year,
       time_to_treatment_binned = case_when(
-        is.na(time_to_treatment) ~ NA_real_,
+        is.na(time_to_treatment) ~ -1, # Assign Control group to Reference Period (-1)
         time_to_treatment <= -3 ~ -3,
         time_to_treatment >= 3  ~ 3,
         TRUE ~ time_to_treatment
       ),
-      time_to_treatment_factor = factor(time_to_treatment_binned),
-      time_to_treatment_factor = forcats::fct_explicit_na(time_to_treatment_factor, na_level = "Control")
+      # Ensure it's a factor
+      time_to_treatment_factor = factor(time_to_treatment_binned)
     )
-  if (any(analysis_data$time_to_treatment_factor != "Control")) {
-    analysis_data$time_to_treatment_factor <- relevel(analysis_data$time_to_treatment_factor, ref = "-1")
-  } else {
-    return(NULL)
-  }
+  
+  # 3. Set Reference Level to -1 (Pre-treatment year)
+  # Note: Control units are also sitting at -1, providing the counterfactual baseline
+  analysis_data$time_to_treatment_factor <- relevel(analysis_data$time_to_treatment_factor, ref = "-1")
+  
+  # 4. Construct Formula
   model_formula <- as.formula(
     paste(
       "pedestrian_death_or_injury ~ time_to_treatment_factor +",
       paste(control_interventions, collapse = " + "),
-      "+ covid_2020 + scaled_summonses + scaled_traffic_volume + ns(scaled_pop_density, df = 2)",
-      "+ (1 | boro_name/ntaname/intersection_id)"
+      "+ scaled_summonses + scaled_traffic_volume + covid_2020 + ns(scaled_pop_density, df = 2) + scaled_time", 
+      "| intersection_id" 
     )
   )
+  
+  # 5. Run Model (Try NB first, Fallback to Poisson)
+  
+  # Attempt A: Negative Binomial
+  use_poisson <- FALSE
   event_model <- tryCatch({
-    glmmTMB(model_formula, family = nbinom1, data = analysis_data)
-  }, error = function(e) {
-    message(paste("Model for", target_intervention, "failed to converge:", e$message))
-    return(NULL)
-  })
+    fenegbin(model_formula, data = analysis_data)
+  }, error = function(e) NULL)
+  
+  # Check if NB failed or produced NA Standard Errors
+  if (!is.null(event_model)) {
+    summ_check <- summary(event_model, se = "cluster")
+    if (any(is.na(summ_check$coeftable[, 2]))) {
+      use_poisson <- TRUE # NB ran but failed SEs
+    }
+  } else {
+    use_poisson <- TRUE # NB failed to converge entirely
+  }
+  
+  # Attempt B: Poisson (PPML) - If NB failed
+  if (use_poisson) {
+    # message(paste("  ! Switching to Poisson (PPML) for:", target_intervention))
+    event_model <- tryCatch({
+      fepois(model_formula, data = analysis_data)
+    }, error = function(e) NULL)
+  }
+  
   if (is.null(event_model)) return(NULL)
-  results <- broom.mixed::tidy(event_model, conf.int = TRUE, exponentiate = TRUE) %>%
-    filter(grepl("time_to_treatment_factor", term) & !grepl("Control", term)) %>%
-    mutate(
-      relative_time = as.numeric(gsub("time_to_treatment_factor", "", term))
-    )
-  reference_period <- tibble(
-    term = "t = -1", estimate = 1, conf.low = 1, conf.high = 1, relative_time = -1
+  
+  # 6. Extract Results (Cluster by Intersection)
+  summ_obj <- summary(event_model, se = "cluster")
+  coeftable <- summ_obj$coeftable
+  
+  results_df <- data.frame(
+    term = rownames(coeftable),
+    estimate_log = coeftable[, 1],
+    std_error = coeftable[, 2]
   )
-  plot_data <- bind_rows(results, reference_period) %>%
+
+  # 7. Process Results
+  plot_data_raw <- results_df %>%
+    filter(grepl("time_to_treatment_factor", term)) %>%
+    mutate(
+      # Regex to extract the time bin number
+      clean_term = str_extract(term, "-?[0-9]+$"),
+      relative_time = as.numeric(clean_term),
+      
+      # Calculate CIs on Log Scale
+      lower_log = estimate_log - 1.96 * std_error,
+      upper_log = estimate_log + 1.96 * std_error,
+
+      # Exponentiate to get IRRs
+      estimate = exp(estimate_log),
+      conf.low = exp(lower_log),
+      conf.high = exp(upper_log)
+    ) %>%
+    filter(!is.na(relative_time)) %>%
+    select(relative_time, estimate, conf.low, conf.high)
+
+  # 8. Add Reference Period
+  reference_period <- tibble(
+    relative_time = -1, estimate = 1, conf.low = 1, conf.high = 1
+  )
+  
+  plot_data <- bind_rows(plot_data_raw, reference_period) %>%
     arrange(relative_time)
+  
   plot_title <- toTitleCase(gsub("_post", "", target_intervention))
   plot_title <- gsub("_", " ", plot_title)
   
+  # 9. Plotting
   p <- ggplot(plot_data, aes(x = relative_time, y = estimate)) +
     geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
     geom_vline(xintercept = -0.5, linetype = "dotted", color = "red") +
-    geom_pointrange(aes(ymin = conf.low, ymax = conf.high), size = 0.5) +
+    
+    # Error bars
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3, color = "black", alpha = 0.7) +
+    
+    # Points
+    geom_point(size = 2, color = "black") +
+    
     labs(
       title = plot_title, 
       x = NULL,
       y = NULL
     ) +
     scale_x_continuous(breaks = seq(min(plot_data$relative_time, na.rm=TRUE), max(plot_data$relative_time, na.rm=TRUE), by=2)) +
-    theme_minimal(base_size = 9)
+    theme_minimal(base_size = 10) +
+    theme(plot.title = element_text(size = 10, face = "bold"))
     
   return(p)
 }
 
-# Define the list of interventions to loop through.
+# Initialize list
 interventions_to_test <- c(
   "slow_zones_post",
   "turn_traffic_calming_post",
@@ -423,46 +506,48 @@ interventions_to_test <- c(
   "speed_limit_post"
 )
 
-# Initialize an empty list to store the plots.
 panel_plots <- list()
 
-# Loop through each intervention, run the model, and store the resulting plot.
-cat("--- Running intervention-specific event studies and collecting plots... ---\n")
+# Loop
+cat("--- Running intervention-specific event studies (Fixed Effects) ---\n")
 for (intervention in interventions_to_test) {
   cat("  - Running for:", intervention, "\n")
-  panel_plots[[intervention]] <- run_event_study_for_panel(sites_ever_treated, intervention)
+  p <- run_event_study_for_panel(sites_ever_treated, intervention)
+  if(!is.null(p)) {
+    panel_plots[[intervention]] <- p
+  } else {
+    cat("    > Skipped (Insufficient data)\n")
+  }
 }
-cat("--- All plots collected. ---\n")
+cat("--- Analysis complete. ---\n")
 
-
-# Assemble the final multi-panel figure using the patchwork package.
-multi_panel_figure <- wrap_plots(panel_plots, ncol = 3)
-
-final_figure <- multi_panel_figure +
-  plot_annotation(
-    title = "Intervention-Specific Event Study Analyses",
-    subtitle = "All estimates are relative to 1 year prior to treatment (t = -1)",
-    tag_levels = 'a' 
-  ) &
-  theme(
-    plot.title = element_text(size = 12, face = "bold"),
-    plot.subtitle = element_text(size = 11),
-    plot.tag = element_text(size = 8, face = "bold")
-  )
-
-# Add common axis labels to the combined figure.
-final_figure_with_axes <- wrap_elements(panel = final_figure) +
-  labs(x = "Years Relative to Intervention", y = "Incidence Rate Ratio (IRR)") +
-  theme(
-    plot.background = element_rect(fill = "white", color = NA)
-  )
-
-# Display the final, combined figure.
-print(final_figure_with_axes)
+# Assemble Figure
+if(length(panel_plots) > 0){
+  multi_panel_figure <- wrap_plots(panel_plots, ncol = 3)
+  
+  final_figure <- multi_panel_figure +
+    plot_annotation(
+      title = "Intervention-Specific Event Study Analyses for Each VZ Intervention",
+      subtitle = "Relative to 1 year prior to treatment (t = -1)",
+      tag_levels = 'a' 
+    ) &
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      plot.tag = element_text(size = 10, face = "bold")
+    )
+  
+  final_figure_with_axes <- wrap_elements(panel = final_figure) +
+    labs(x = "Years Relative to Intervention", y = "Incidence Rate Ratio (IRR)") +
+    theme(
+      plot.background = element_rect(fill = "white", color = NA)
+    )
+  
+  print(final_figure_with_axes)
+} else {
+  print("No plots were generated.")
+}
 ```
-
-
-
 
 
 

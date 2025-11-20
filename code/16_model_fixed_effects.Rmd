@@ -1,0 +1,525 @@
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(glmmTMB)
+library(DHARMa)
+library(effects)
+library(performance)
+library(purrr)
+library(furrr)
+library(splines)
+library(future.apply)
+library(broom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(plotly) 
+library(ggeffects)
+```
+
+# Uploading and Preparing the Data
+
+```{r}
+# uploading
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', show_col_types = FALSE)
+# meant to handle large datasets
+sites_ever_treated <- as.data.table(sites_ever_treated)
+```
+
+```{r}
+# scale variables
+# the incidence ratio of these variables will now represent the change in odds for a *one standard deviation* increase in the original predictor
+# nyc_metro_pop not included to to multicollnearity
+
+sites_ever_treated <- sites_ever_treated %>%
+  mutate(
+    scaled_summonses = scale(citywide_traffic_summonses),
+    scaled_traffic_volume = scale(nyc_metro_dvmt),
+    scaled_pop_density = scale(pop_per_sqmi),
+    scaled_time = scale(time)
+  )
+```
+
+# Fixed effects for intersections
+
+```{r}
+model_fixed <- fenegbin(
+  pedestrian_death_or_injury ~ 
+    turn_traffic_calming_post +
+    leading_pedestrian_interval_post +
+    enhanced_crossing_post +
+    speed_humps_post +
+    street_improvement_project_post +
+    street_improvement_corridors_post +
+    signal_retiming_post +
+    slow_zones_post +
+    speed_limit_post +
+    covid_2020 + 
+    scaled_summonses + 
+    scaled_traffic_volume + 
+    ns(scaled_pop_density, df = 2) +        
+    scaled_time | 
+    intersection_id,
+  data = sites_ever_treated
+)
+
+summary(model_fixed)
+```
+
+```{r}
+# exploring model_fixed since it is the final chosen model
+
+# Load broom (fixest works with broom automatically)
+library(broom)
+
+# Tidy the model output
+# fixest automatically clusters SEs by the fixed effect (intersection_id)
+irr_results_tidy <- tidy(model_fixed, 
+                         conf.int = TRUE,      # Calculate confidence intervals
+                         exponentiate = TRUE,  # Exponentiate to get IRRs
+                         se = "cluster") %>%   # Explicitly request clustered SEs
+                   select(term, estimate, conf.low, conf.high, p.value)
+
+# Print the clean results table
+print(irr_results_tidy)
+```
+
+```{r}
+# visualizing results
+library(plotly)
+library(dplyr)
+library(fixest)
+
+# extract from the summary table to ensure row counts match (ignoring theta)
+model_summary <- summary(model_fixed, se = "cluster")$coeftable
+
+# extract columns by index to be safe (1=Est, 2=SE, 4=Pval)
+coef_point_estimates <- model_summary[, 1]
+model_se <- model_summary[, 2]
+p_values_model <- model_summary[, 4]
+
+# compute z-scores 
+z_scores <- coef_point_estimates / model_se
+
+# compute confidence intervals (normal approximation)
+ci_lower <- coef_point_estimates - 1.96 * model_se
+ci_upper <- coef_point_estimates + 1.96 * model_se
+
+# define custom order
+custom_order <- c(
+  #"scaled_time",
+  # "ns(scaled_pop_density, df = 2)1", 
+  # "ns(scaled_pop_density, df = 2)2",
+  #"scaled_traffic_volume",
+  #"scaled_summonses",
+  #"covid_2020",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+# create percent change data frame
+percent_change_df <- data.frame(
+  term = names(coef_point_estimates),
+  percent_change = 100 * (exp(coef_point_estimates) - 1),
+  lower_ci = 100 * (exp(ci_lower) - 1),
+  upper_ci = 100 * (exp(ci_upper) - 1),
+  p_value = p_values_model
+) %>%
+  # Filter to only include terms in the custom order
+  filter(term %in% custom_order) %>%
+  mutate(
+    significant = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    term = factor(term, levels = custom_order)
+  )
+
+# set factor levels for y-axis ordering
+percent_change_df$term <- factor(percent_change_df$term, levels = custom_order)
+
+# create interactive Plotly chart
+p <- plot_ly(data = percent_change_df) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "Percent Change: ", round(percent_change, 2), "%<br>",
+      "95% CI: (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "p-value: ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Fixed Effects Negative Binomial; SEs clustered by Intersection",
+    xaxis = list(
+      title = "Percent Change", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "Fixed Effect", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    colorway = c("blue", "red")
+  )
+
+# show the plot
+p
+```
+
+# Boostrapped CIs
+
+```{r}
+# Robust Bootstrapping Function for fixest::fenegbin
+cluster_bootstrap_fixest <- function(model, data, cluster_var, R = 500, secs_per_iter = NULL) {
+  
+  if (!is.null(secs_per_iter)) {
+    total_hours <- secs_per_iter * R / 3600
+    cat("Estimated total time:", round(total_hours, 2), "hours\n")
+  }
+  
+  # 1. Setup Clusters
+  clusters <- unique(data[[cluster_var]])
+  n_clusters <- length(clusters)
+  
+  # 2. Prepare Storage
+  # We grab the formula directly from the original model
+  model_formula <- model$fml
+  
+  # Get original coefficient names to set up the matrix
+  original_coefs <- coef(model)
+  coef_names <- names(original_coefs)
+  
+  coefs_mat <- matrix(NA, nrow = R, ncol = length(original_coefs))
+  colnames(coefs_mat) <- coef_names
+
+  # 3. Bootstrap Loop
+  for(i in 1:R) {
+    if(i %% 50 == 0) cat("Bootstrap iteration:", i, "\n")
+
+    # A. Resample Clusters
+    sampled_clusters <- sample(clusters, n_clusters, replace = TRUE)
+    
+    # B. Construct Bootstrapped Dataset
+    # We rely on data.table/split logic implicitly here via lapply for speed/safety
+    boot_data <- do.call(rbind, lapply(sampled_clusters, function(cl) {
+      data[data[[cluster_var]] == cl, ]
+    }))
+
+    # C. Refit Model (Using direct function call, not update)
+    boot_model <- tryCatch({
+      fixest::fenegbin(model_formula, data = boot_data, nthreads = 1) # Force single thread inside loop to prevent overhead
+    }, error = function(e) {
+      # Print error only for the first iteration to help debugging
+      if(i == 1) message(paste("Iteration 1 Failed:", e$message))
+      return(NULL)
+    })
+
+    # D. Store Results Safely (Matching by Name)
+    if (!is.null(boot_model)) {
+      try_coefs <- tryCatch(coef(boot_model), error = function(e) NULL)
+      
+      if(!is.null(try_coefs)) {
+        # Find which coefficients exist in both (handling dropped vars)
+        common_vars <- intersect(names(try_coefs), coef_names)
+        
+        # Assign only the matching columns
+        coefs_mat[i, common_vars] <- try_coefs[common_vars]
+      }
+    }
+  }
+
+  # 4. Post-Processing
+  
+  # Standard Errors
+  bootstrap_se <- apply(coefs_mat, 2, sd, na.rm = TRUE)
+  
+  # Percentile CIs
+  ci_lower <- apply(coefs_mat, 2, function(x) quantile(x, 0.025, na.rm = TRUE))
+  ci_upper <- apply(coefs_mat, 2, function(x) quantile(x, 0.975, na.rm = TRUE))
+
+  # P-values
+  p_values <- sapply(1:length(original_coefs), function(j) {
+    est <- original_coefs[j]
+    boot_vals <- coefs_mat[, j]
+    
+    # Count valid runs
+    valid_runs <- sum(!is.na(boot_vals))
+    if(valid_runs < 10) return(NA) # Return NA if too few successful runs
+    
+    opposite_sign <- mean(boot_vals * est < 0, na.rm = TRUE)
+    min(1, opposite_sign * 2)
+  })
+
+  # Convergence Rate
+  convergence_rate <- 1 - (sum(apply(coefs_mat, 1, function(x) all(is.na(x)))) / R)
+
+  return(list(
+    coefs = coefs_mat,
+    bootstrap_se = bootstrap_se,
+    ci_lower = ci_lower,
+    ci_upper = ci_upper,
+    p_values = p_values,
+    convergence_rate = convergence_rate,
+    total_iterations = R
+  ))
+}
+
+# --- RUN THE BOOTSTRAP ---
+
+# 1. Run 1 iteration to check for errors and time
+start_time <- Sys.time()
+
+cat("--- Test Run (1 Iteration) ---\n")
+test_results <- cluster_bootstrap_fixest(
+  model = model_fixed, 
+  data = sites_ever_treated, 
+  cluster_var = "intersection_id", 
+  R = 1
+)
+
+end_time <- Sys.time()
+secs_per_iter <- as.numeric(difftime(end_time, start_time, units = "secs"))
+cat("Seconds per iteration:", round(secs_per_iter, 2), "\n")
+
+# Check if test run worked
+if(test_results$convergence_rate == 0) {
+  stop("Test run failed to produce any coefficients. Check the error message above.")
+}
+
+# 2. Run Full Bootstrap (If test passed)
+cat("--- Starting Full Bootstrap ---\n")
+boot_results <- cluster_bootstrap_fixest(
+    model = model_fixed,
+    data = sites_ever_treated,
+    cluster_var = "intersection_id",
+    R = 1000, 
+    secs_per_iter = secs_per_iter
+)
+
+# 3. Check results
+print(boot_results$convergence_rate)
+print(head(boot_results$coefs))
+```
+
+```{r}
+library(plotly)
+library(dplyr)
+
+# --- STEP 1: DATA PREPARATION ---
+
+# 1. Extract Data
+# Ensure we match everything by name so the order doesn't get mixed up
+coefs <- coef(model_fixed)
+se    <- boot_results$bootstrap_se
+
+# Keep only coefficients that exist in both
+common <- intersect(names(coefs), names(se))
+coefs <- coefs[common]
+se    <- se[common]
+
+# 2. Compute Z-scores, P-values, and CIs (Normal Approximation)
+# We calculate P-values here to ensure they match the Visual CIs perfectly
+z_scores <- coefs / se
+p_values <- 2 * (1 - pnorm(abs(z_scores)))
+ci_lower_log <- coefs - 1.96 * se
+ci_upper_log <- coefs + 1.96 * se
+
+# 3. Build Data Frame
+plot_df <- data.frame(
+  term = names(coefs),
+  percent_change = 100 * (exp(coefs) - 1),
+  lower_ci = 100 * (exp(ci_lower_log) - 1),
+  upper_ci = 100 * (exp(ci_upper_log) - 1),
+  p_value = p_values
+)
+
+# --- STEP 2: ORDERING AND FACTORS  ---
+
+custom_order <- c(
+  "scaled_time",
+  "scaled_traffic_volume",
+  "scaled_summonses",
+  "speed_limit_post",
+  "slow_zones_post",
+  "street_improvement_corridors_post",
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "speed_humps_post",
+  "enhanced_crossing_post",
+  "leading_pedestrian_interval_post",
+  "turn_traffic_calming_post"
+)
+
+plot_df_filtered <- plot_df %>%
+  filter(term %in% custom_order) %>%
+  mutate(
+    # 1. Define Significance Label
+    significant_label = ifelse(p_value < 0.05, "Significant", "Not Significant"),
+    
+    # 2. Force Factor Levels
+    significant = factor(significant_label, levels = c("Significant", "Not Significant")),
+    
+    # 3. Apply Term Ordering
+    term = factor(term, levels = custom_order)
+  )
+
+# --- STEP 3: PLOT ---
+
+p <- plot_ly(data = plot_df_filtered) %>%
+  add_segments(
+    x = ~lower_ci,
+    xend = ~upper_ci,
+    y = ~term,
+    yend = ~term,
+    color = ~significant, # Maps to the factor we fixed above
+    colors = c("Significant" = "blue", "Not Significant" = "red"), # Explicit mapping
+    showlegend = FALSE,
+    hoverinfo = "none",
+    line = list(width = 2)
+  ) %>%
+  add_markers(
+    x = ~percent_change,
+    y = ~term,
+    color = ~significant,
+    colors = c("Significant" = "blue", "Not Significant" = "red"),
+    marker = list(size = 10),
+    text = ~paste0(
+      "<b>Term:</b> ", term, "<br>",
+      "<b>% Change:</b> ", round(percent_change, 2), "%<br>",
+      "<b>95% CI:</b> (", round(lower_ci, 2), "%, ", round(upper_ci, 2), "%)<br>",
+      "<b>P-value:</b> ", round(p_value, 4)
+    ),
+    hoverinfo = 'text'
+  ) %>%
+  layout(
+    title = "Pedestrian Deaths and Injuries",
+    subtitle = "Fixed Effects NB Estimates with Cluster-Bootstrap CIs",
+    xaxis = list(
+      title = "Percent Change in Injuries", 
+      zeroline = TRUE, 
+      zerolinecolor = 'black', 
+      zerolinewidth = 1
+    ),
+    yaxis = list(
+      title = "", 
+      categoryorder = "array", 
+      categoryarray = rev(custom_order)
+    ),
+    legend = list(title = list(text = "Significance")),
+    margin = list(l = 150)
+  )
+
+p
+```
+
+```{r}
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+# 1. Define the specific variables of interest 
+intervention_vars <- c(
+  "street_improvement_project_post",
+  "signal_retiming_post",
+  "leading_pedestrian_interval_post",
+  "enhanced_crossing_post",
+  "street_improvement_corridors_post",
+  "speed_limit_post",
+  "speed_humps_post",
+  "turn_traffic_calming_post",
+  "slow_zones_post"
+)
+
+# 2. Extract Data
+# Point Estimates from the Fixed Effects Model
+beta <- coef(model_fixed)[intervention_vars]
+
+# Standard Errors from the Bootstrap Results
+se_boot <- boot_results$bootstrap_se[intervention_vars]
+
+# 3. Perform Calculations
+# Step A: Z-scores & P-values (Wald test using Bootstrap SE)
+z_score <- beta / se_boot
+p_val   <- 2 * (1 - pnorm(abs(z_score)))
+
+# Step B: IRR Calculations
+# Calculate CIs on Log scale first
+lower_log <- beta - 1.96 * se_boot
+upper_log <- beta + 1.96 * se_boot
+
+irr_est   <- exp(beta)
+irr_lower <- exp(lower_log)
+irr_upper <- exp(upper_log)
+
+# Step C: Percent Change Calculations
+pct_est   <- 100 * (irr_est - 1)
+pct_lower <- 100 * (irr_lower - 1)
+pct_upper <- 100 * (irr_upper - 1)
+
+# 4. Construct the Table
+results_table <- data.frame(
+  Intervention = names(beta),
+  
+  # Column 1: IRR
+  IRR = sprintf("%.3f", irr_est),
+  
+  # Column 2: 95% CI for IRR
+  IRR_CI = paste0("(", sprintf("%.3f", irr_lower), ", ", sprintf("%.3f", irr_upper), ")"),
+  
+  # Column 3: % Change
+  Percent_Change = sprintf("%.2f%%", pct_est),
+  
+  # Column 4: 95% CI for % Change
+  Pct_Change_CI = paste0("(", sprintf("%.2f", pct_lower), "%, ", sprintf("%.2f", pct_upper), "%)"),
+  
+  # Column 5: P-value
+  P_Value = sprintf("%.4f", p_val)
+)
+
+# Clean up the Intervention Names for display (remove underscores, Title Case)
+results_table$Intervention <- tools::toTitleCase(gsub("_post", "", results_table$Intervention))
+results_table$Intervention <- gsub("_", " ", results_table$Intervention)
+
+# 5. Render the Table
+results_table %>%
+  kable(
+    format = "html", 
+    caption = "<b>Impact of Interventions: Fixed Effects NB Estimates with Bootstrap CIs</b>",
+    align = c("l", "c", "c", "c", "c", "c")
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = TRUE) %>% # Make intervention names bold
+  column_spec(6, bold = ifelse(as.numeric(p_val) < 0.05, TRUE, FALSE)) # Highlight significant p-values
+```
+
