@@ -1190,6 +1190,14 @@ p <- plot_ly(data = percent_change_df) %>%
 p
 ```
 
+```{r}
+# is there multicollinearity?
+
+# no issues
+
+check_collinearity(model_fixed)
+```
+
 
 
 
