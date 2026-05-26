@@ -1,31 +1,90 @@
-## Vision Zero Analysis
+# Vision Zero Analysis
+This repository holds the code for the Data Team's analysis of Vision Zero, an NYC initiative launched in 2014 that aims to reduce traffic fatalities in the City to zero. An associated pre-print for this analysis may be accessed through [this link](https://zenodo.org/records/18774081). 
 
-This repo holds the code for the Data Team's analysis of Vision Zero, an NYC initiative launched in 2014 that aims to reduce traffic fatalities in the city to zero. 
+***
 
-#### Datasets Used:
+## Summary and Intention
 
-Datasets:
-- Motor Vehicle Collisions - Crashes
-- LION Dataset
-- DOT-provided: Crashes with intersection IDs (connects collision dataset to LION)
-- NYC Planimetrics Database: Roadbed
-- NYPD Criminal Court Summonses
-- US Federal Highway Administration: Miles and Daily Vehicle - Miles Traveled
-- VZV Speed Limits
-- VZV Speed Humps
-- VZV Leading Pedestrian Interval Signals
-- VZV Enhanced Crossings
-- VZV Left Turn Traffic Calming
-- VZV Neighborhood Slow Zones
-- VZV Signal Timing
-- VZV Street Improvement Projects Intersections
-- VZV Street Improvement Projects Corridor
+### Motivation
+Despite advancements in vehicle safety, motor vehicle crashes remain a leading cause of mortality globally and in the United States. In 2014, NYC adopted the Vision Zero framework, shifting the perspective of traffic collisions from isolated human errors to a systemic public health issue. Till now, few studies have assessed the city's VZ program, and once that have were limited in scope and/or methodology. Our analysis aims to fill this gap by disaggregatig the impacts of nine differnt NYC VZ interventions.
 
-#### Model
+### Research Questions
+* Have NYC's Vision Zero on-street interventions successfully reduced the number of pedestrian casualties (deaths and injuries) resulting from motor vehicle collisions?
+* Controlling for the overlapping rollout of multiple safety treatments, which specific physical and regulatory interventions provide the greatest protective benefits for pedestrians?
 
-For this analysis, we employed a negative binomial regression model to account for overdispersion in the outcome data (dispersion statistic: 1.62). The model was deployed using the glmmTMB package in R, incorporating fixed effects for the interventions and control variables, along with nested random intercepts for boroughs, NTAs, and intersections to account for baseline heterogeneity across multiple spatial scales. The relationship between population density and the number of pedestrian casualties was modeled using a natural spline with 2 degrees of freedom to capture evident nonlinearity. To account for heteroskedasticity, we calculated cluster-bootstrap robust standard errors. 
+## Methodology 
 
-#### Results
+### Datasets (data/input/ directory):
 
-Overall, pedestrian casualties in the city decreased during the observation period. After controlling for this downward trend, significant, negative associations with pedestrian casualties were still found for the citywide speed limit reduction (IRR 0.95, 95% CI 0.90 to 0.99), neighborhood slow zones (IRR 0.82, 95% CI 0.65 to 0.96), speed humps (IRR 0.87, 95% CI 0.78 to 0.95), SIP corridors (IRR 0.95, 95% CI 0.90 to 0.99), and turn traffic calming (IRR 0.83, 95% CI 0.72 to 0.91). A small, but significant positive association was found for 25 MPH signal retiming (IRR 1.07, 95% CI 1.02 to 1.11), representing a 6.8% increase. Enhanced crossings, leading pedestrian interval signals, and SIP intersections did not demonstrate any significant impact on pedestrian casualties. Neighborhood slow zones and turn traffic calming stand out as having the largest effects, at -17.6% and -17.2%, respectively. The majority of residual variance was at the intersection level (SD = 1.14), followed by NTA (SD = 0.51) and borough (SD = 0.27), indicating substantial variation in pedestrian injury rates across these spatial units. 
+- [Motor Vehicle Collisions - Crashes](https://data.cityofnewyork.us/Public-Safety/Motor-Vehicle-Collisions-Crashes/h9gi-nx95/about_data)
+- [LION Dataset](https://www.nyc.gov/content/planning/pages/resources/datasets/lion)
+- DOT Internal Data: Crashes with intersection IDs (available in data/input/dot_data)
+- [NYC Planimetrics Database: Roadbed](https://data.cityofnewyork.us/Transportation/NYC-Planimetric-Database-Roadbed/i36f-5ih7/about_data)
+- [NYPD Criminal Court Summonses](https://data.cityofnewyork.us/Public-Safety/NYPD-Criminal-Court-Summons-Incident-Level-Data-Ye/mv4k-y93f/about_data)
+- [US Federal Highway Administration: Miles and Daily Vehicle - Miles Traveled](https://www.fhwa.dot.gov/policyinformation/travel_monitoring/tvt.cfm)
+- [VZV Speed Limits](https://data.cityofnewyork.us/Transportation/VZV-Speed-Limits/5mad-ntua/about_data)
+- [VZV Speed Humps](https://data.cityofnewyork.us/Transportation/VZV-Speed-Humps/jknp-skuy/about_data)
+- [VZV Leading Pedestrian Interval Signals](https://data.cityofnewyork.us/Transportation/VZV-Leading-Pedestrian-Interval-Signals/xc4v-ntf4/about_data)
+- [VZV Enhanced Crossings](https://data.cityofnewyork.us/Transportation/VZV-Enhanced-Crossings/6ax4-q5k4/about_data)
+- [VZV Turn Traffic Calming](https://data.cityofnewyork.us/Transportation/VZV-Turn-Traffic-Calming/sm2x-35i7/about_data)
+- [VZV Neighborhood Slow Zones](https://data.cityofnewyork.us/Transportation/VZV-Neighborhood-Slow-Zones/bqye-aqft/about_data)
+- [VZV Signal Retiming](https://data.cityofnewyork.us/Transportation/VZV-Signal-Timing-25MPH-Signal-Retiming/d8dp-wfee/about_data)
+- [VZV Street Improvement Projects Intersections](https://data.cityofnewyork.us/Transportation/VZV-Street-Improvement-Projects-SIP-Intersections/shr7-eqdc/about_data)
+- [VZV Street Improvement Projects Corridor](https://data.cityofnewyork.us/Transportation/VZV-Street-Improvement-Projects-SIP-Corridor/if4c-w48d/about_data)
+
+### Statistical Analysis 
+* **Study Design:** Staggered difference-in-difference (DiD) analysis evaluating nine distinct VZ interventions over an 11-year period (2013–2023). 
+* **Sample:** 9,562 treated intersections, 105,182 intersection-year observations. 
+* **Modeling:** Fixed-effects negative binomial regression model with annual pedestrian deaths and injuries at the intersection level as the outcome.
+* **Controls:** Intersection-level fixed effects (accounting for time-invariant traits like geometry), annual traffic volume, traffic enforcement intensity (criminal summonses), population density, a COVID-19 pandemic indicator, and a linear time trend.
+* **Assumption Validation:** The parallel trends assumption was validated using descriptive cohort plots, a global event study, and nine intervention-specific event studies.
+
+### Scripts (code/ directory)
+
+#### 00_upload_lion.Rmd
+Saves usable LION dataset.
+
+#### 01_clean_lion_dataset.ipynb
+Cleaning LION data to obtain street geometries.
+
+#### 02_clean_node_dataset.ipynb
+Obtaining intersection geometries using LION node data.
+
+#### 03_add_collisions.ipynb
+Adding information about collisions in NYC.
+
+#### 04_build_vz_table.ipynb
+Building final table shell.
+
+#### 05_add_interventions.ipynb
+Adding intervention-years into the table.
+
+#### 06_add_controls.ipynb
+Adding controls columns and rows into the table.
+
+#### 07_prep_dataset_for_analysis.ipynb
+Prepping various datasets for analysis, using different inclusion/exclusion criteria. 
+
+#### 08_eda.ipynb
+Visualization and EDA.
+
+#### 09_model_fixed_effects.Rmd
+Final fixed effects NB model with diagnostics. 
+
+#### 10_speed_limit_fixed_effects.Rmd
+Final sensitivity analysis models for speed limit change. 
+
+#### 11_event_study_fixed_effects.Rmd
+Event study to check parallel trends assumption. 
+
+## Results
+We identified four interventions that were associated with statistically significant reductions in annual pedestrian casualties:
+* **Turn Traffic Calming:** 27% reduction (Incidence Rate Ratio [IRR] 0.73, 95% CI: 0.64, 0.85).
+* **Neighborhood Slow Zones:** 21% reduction (IRR 0.79, 95% CI: 0.66, 0.94).
+* **Leading Pedestrian Interval (LPI) Signals:** IRR 0.87 (95% CI: 0.82, 0.93).
+* **Citywide Speed Limit Reduction (30 to 25 MPH):** IRR 0.90 (95% CI: 0.85, 0.95).
+
+## Conclusions
+* **Scale up proven interventions:** Policymakers and transportation planners should concentrate funding and resources on interventions that physically or regulatorily compel slower vehicle speeds (e.g., Turn Traffic Calming, Neighborhood Slow Zones) and interventions that increase pedestrian visibility by separating signal phasing (e.g., LPIs). 
+* **Investigate null findings contextually:** The lack of significant benefit for interventions like enhanced crossings or SIPs does not mean they should be universally abandoned. Agencies should conduct targeted, site-specific evaluations to learn how these tools can be deployed more effectively.
 
