@@ -63,7 +63,7 @@ Adding intervention-years into the table.
 Adding controls columns and rows into the table.
 
 #### 07_prep_dataset_for_analysis.ipynb
-Prepping various datasets for analysis, using different inclusion/exclusion criteria. 
+Prepping various datasets (including final analytic dataset and sensitivity analysis data) for analysis, using different inclusion/exclusion criteria. 
 
 #### 08_eda.ipynb
 Visualization and EDA.
