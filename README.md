@@ -1,15 +1,15 @@
 # Vision Zero Analysis
-This repository holds the code for the Data Team's analysis of Vision Zero, an NYC initiative launched in 2014 that aims to reduce traffic fatalities in the City to zero. An associated pre-print for this analysis may be accessed through [this link](https://zenodo.org/records/18774081). 
+This repository holds the code for the Data Team's analysis of Vision Zero, an NYC initiative launched in 2014 that aims to reduce traffic fatalities in the City to zero. An associated pre-print for this analysis may be accessed through [this link](https://zenodo.org/records/18774081). The study has also been conditionally approved for publication in the Journal of Safety Research, pending final revisions.
 
 ***
 
 ## Summary and Intention
 
 ### Motivation
-Despite advancements in vehicle safety, motor vehicle crashes remain a leading cause of mortality globally and in the United States. In 2014, NYC adopted the Vision Zero framework, shifting the perspective of traffic collisions from isolated human errors to a systemic public health issue. Till now, few studies have assessed the city's VZ program, and once that have were limited in scope and/or methodology. Our analysis aims to fill this gap by disaggregatig the impacts of nine differnt NYC VZ interventions.
+Despite advancements in vehicle safety, motor vehicle crashes remain a leading cause of mortality globally and in the United States. In 2014, NYC adopted the Vision Zero framework, shifting the perspective of traffic collisions from isolated human errors to a systemic public health issue. Till now, few studies have assessed the NYC VZ program, and ones that have were limited in scope and/or methodology. Our analysis aims to fill this gap by disaggregatig the impacts of nine different NYC VZ interventions.
 
 ### Research Questions
-* Have NYC's Vision Zero on-street interventions successfully reduced the number of pedestrian casualties (deaths and injuries) resulting from motor vehicle collisions?
+* Have NYC VZ on-street interventions successfully reduced the number of pedestrian casualties (deaths and injuries) resulting from motor vehicle collisions?
 * Controlling for the overlapping rollout of multiple safety treatments, which specific physical and regulatory interventions provide the greatest protective benefits for pedestrians?
 
 ## Methodology 
@@ -37,7 +37,7 @@ Despite advancements in vehicle safety, motor vehicle crashes remain a leading c
 * **Sample:** 9,562 treated intersections, 105,182 intersection-year observations. 
 * **Modeling:** Fixed-effects negative binomial regression model with annual pedestrian deaths and injuries at the intersection level as the outcome.
 * **Controls:** Intersection-level fixed effects (accounting for time-invariant traits like geometry), annual traffic volume, traffic enforcement intensity (criminal summonses), population density, a COVID-19 pandemic indicator, and a linear time trend.
-* **Assumption Validation:** The parallel trends assumption was validated using descriptive cohort plots, a global event study, and nine intervention-specific event studies.
+* **Parallel Trends Assumption:** Validated using descriptive cohort plots, a global event study, and nine intervention-specific event studies.
 
 ### Scripts (code/ directory)
 
