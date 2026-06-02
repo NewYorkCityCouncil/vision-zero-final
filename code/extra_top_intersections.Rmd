@@ -37,7 +37,7 @@ sites_ever_treated <- as.data.table(sites_ever_treated)
 
 ### General Cleaning and Setup 
 ```{r}
-# 1. Summarize Interventions and "Turn On" Years
+# 1. Summarize Interventions and Years
 intervention_cols <- c(
   "leading_pedestrian_interval_post", "turn_traffic_calming_post", 
   "speed_limit_post", "slow_zones_post", "enhanced_crossing_post", 
@@ -86,38 +86,31 @@ cas_summary <- sites_ever_treated %>%
 
 # 3. Extract unique geometries and create a master spatial dataframe
 sf::sf_use_s2(FALSE) # Avoid errors with spatial intersections
-
 master_sf <- sites_ever_treated %>%
   distinct(intersection_id, intersection_geom) %>%
   filter(!is.na(intersection_geom)) %>%
-  
-  # Step A: Read the WKT. 
+  # Read the WKT 
   sf::st_as_sf(wkt = "intersection_geom", crs = 2263) %>%
-  
-  # Step B: Fix any self-intersecting polygons in the raw NYC data
+  # Fix any self-intersecting polygons
   sf::st_make_valid() %>%
-
-  # Step C: Extract centroid for clean mapping
+  # Extract centroid for clean mapping
   sf::st_centroid() %>% 
-  
-  # Step D: Ensure it's in standard lat/long for Leaflet
+  # Convert to lat/long for Leaflet
   sf::st_transform(4326) %>%
-  
-  # Step E: Join our casualty and intervention summaries
+  # Join with casualty and intervention summaries
   left_join(cas_summary, by = "intersection_id") %>%
   left_join(interventions_summary, by = "intersection_id") %>%
   mutate(
     interventions_str = ifelse(is.na(interventions_str), "None", interventions_str),
     total_unique_interventions = ifelse(is.na(total_unique_interventions), 0, total_unique_interventions)
   )
-
-# Turn strict spherical geometry back on for the rest of analysis
+# Turn spherical geometry back on for the rest of analysis
 sf::sf_use_s2(TRUE)
 ```
 
 ### Reverse Geocoding
 ```{r}
-# 1. Identify the unique intersections we need to geocode (Max 40)
+# 1. Identify the unique intersections to geocode (Max 40)
 # Pull the Top 20 Raw IDs
 ids_raw <- master_sf %>%
   arrange(desc(raw_reduction)) %>%
@@ -131,15 +124,15 @@ ids_pct <- master_sf %>%
   slice(1:20) %>%
   pull(intersection_id)
 
-# Combine and get unique IDs (in case some are in both lists)
-ids_to_geocode <- unique(c(ids_raw, ids_pct))
+# Combine and get unique IDs 
+ids_to_geocode <- unique(c(ids_raw, ids_pct)) # 39 in total
 
-# Filter our spatial dataframe to strictly these IDs
+# Filter spatial dataframe to these IDs
 intersections_to_geocode <- master_sf %>%
   filter(intersection_id %in% ids_to_geocode) %>%
   select(intersection_id, intersection_geom)
 
-# 2. Extract Latitude and Longitude from the sf geometry column
+# 2. Extract lat/long from the sf geometry column
 coords <- st_coordinates(intersections_to_geocode)
 intersections_to_geocode <- intersections_to_geocode %>%
   mutate(
@@ -148,7 +141,7 @@ intersections_to_geocode <- intersections_to_geocode %>%
   ) %>%
   st_drop_geometry()
 
-# 3. Ping OpenStreetMap (Nominatim) to reverse-geocode (Will process exactly <=40 coordinates!)
+# 3. Reverse-geocode 
 geocoded_results <- intersections_to_geocode %>%
   reverse_geocode(
     lat = lat,
@@ -157,7 +150,7 @@ geocoded_results <- intersections_to_geocode %>%
     full_results = TRUE
   )
 
-# 4. Clean up the API output into a single, neat "Location" column
+# 4. Clean up the API output
 geocoded_clean <- geocoded_results %>%
   mutate(
     borough_proxy = coalesce(suburb, "NYC"),
@@ -167,10 +160,9 @@ geocoded_clean <- geocoded_results %>%
   ) %>%
   select(intersection_id, location_label)
 
-# 5. Join these text labels back to our master_sf!
+# 5. Join these text labels back to our master_sf
 master_sf <- master_sf %>%
   left_join(geocoded_clean, by = "intersection_id") %>%
-  # If an intersection wasn't in the top list, it gets an NA.
   mutate(location_label = ifelse(is.na(location_label), "Not Geocoded", location_label))
 ```
 
@@ -240,7 +232,7 @@ leaflet(top20_pct) %>%
 
 ### Setup Council Districts & Spatial Join
 ```{r}
-# Pull Council District Geometries (councilcount)
+# Pull CD Geometries (councilcount)
 vars <- c('DP02_0068E') 
 cd_geo <- councilcount::get_geo_estimates(
   acs_year = "2022", 
@@ -253,12 +245,11 @@ cd_geo <- councilcount::get_geo_estimates(
   mutate(councildist = str_pad(as.character(councildist), width = 2, side = "left", pad = "0")) %>%
   select(councildist, geometry)
 
-# Spatial Join: Intersections (centroids) to Council Districts
-# st_intersects ensures points on borders are handled safely (using centroids previously prevents multi-polygon overlaps)
+# Spatial join intersections centroids to CDs
 intersections_with_cd <- st_join(master_sf, cd_geo, join = st_intersects) %>%
   filter(!is.na(councildist)) # Remove intersections falling outside NYC borders/water
 
-# Aggregate casualty data and interventions up to the Council District level
+# Aggregate casualty data and interventions up to the CD level
 cd_summary <- intersections_with_cd %>%
   st_drop_geometry() %>%
   group_by(councildist) %>%
@@ -308,7 +299,6 @@ leaflet(cd_sf) %>%
 ```
 
 ### 4. Council Districts by % Reduction
-
 ```{r}
 # Jenks breaks for Leaflet legend
 brks_pct <- classIntervals(cd_sf$pct_reduction, n = 5, style = "jenks")$brks
@@ -343,15 +333,13 @@ cd_normalized <- cd_sf %>%
   mutate(
     # Metric 1: Raw Drop per 100 Interventions installed in the CD
     casualties_prevented_per_100_int = (raw_reduction / total_interventions) * 100,
-    
     # Metric 2: Intervention Intensity (Avg interventions per intersection in the CD)
     intervention_intensity = total_interventions / total_intersections,
-    
-    # Metric 3: Percentage points dropped per average intervention applied
+    # Metric 3: Percentage points dropped per average intersection in CD
     pct_drop_per_unit_intensity = pct_reduction / intervention_intensity
   )
 
-# Datatable to explore the normalized metrics
+# Datatable
 datatable(
   cd_normalized %>% st_drop_geometry() %>% 
     arrange(desc(pct_drop_per_unit_intensity)) %>%
@@ -360,7 +348,7 @@ datatable(
   colnames = c("CD", "Intersections", "Total Interventions", "Intensity (Ints/Intersection)", "Cas. Reduced per 100 Ints", "% Drop per Unit Intensity")
 )
 
-# Map of Normalization (Percentage Drop Scaled by Intensity)
+# Leaflet Map
 brks_norm <- classIntervals(cd_normalized$pct_drop_per_unit_intensity, n = 5, style = "jenks")$brks
 pal_norm <- colorBin("Purples", domain = cd_normalized$pct_drop_per_unit_intensity, bins = unique(brks_norm))
 
@@ -379,6 +367,127 @@ leaflet(cd_normalized) %>%
   addLegend(pal = pal_norm, values = ~pct_drop_per_unit_intensity, opacity = 0.7, title = "Normalized Efficacy<br>(% Drop / Intensity)", position = "bottomright")
 ```
 
+### Final Map
+```{r}
+# 1. Prepare Intersections Layer 
+ids_raw <- top20_raw$intersection_id
+ids_pct <- top20_pct$intersection_id
+
+top_intersections <- master_sf %>%
+  filter(intersection_id %in% c(ids_raw, ids_pct)) %>%
+  mutate(
+    category = case_when(
+      intersection_id %in% ids_raw & intersection_id %in% ids_pct ~ "Both Lists",
+      intersection_id %in% ids_raw ~ "Top 20 Raw",
+      intersection_id %in% ids_pct ~ "Top 20 %"
+    )
+  )
+
+# Color palette for intersection markers
+pal_markers <- colorFactor(
+  palette = c("#800080", "#0000FF", "#008000"), # Purple, Blue, Green
+  levels = c("Both Lists", "Top 20 Raw", "Top 20 %")
+)
+
+# 2. Ensure CD Palettes/Breaks are ready
+brks_raw <- classIntervals(cd_normalized$raw_reduction, n = 5, style = "jenks")$brks
+pal_raw <- colorBin("YlOrRd", domain = cd_normalized$raw_reduction, bins = unique(brks_raw))
+
+brks_pct <- classIntervals(cd_normalized$pct_reduction, n = 5, style = "jenks")$brks
+pal_pct <- colorBin("Blues", domain = cd_normalized$pct_reduction, bins = unique(brks_pct))
+
+brks_norm <- classIntervals(cd_normalized$pct_drop_per_unit_intensity, n = 5, style = "jenks")$brks
+pal_norm <- colorBin("Purples", domain = cd_normalized$pct_drop_per_unit_intensity, bins = unique(brks_norm))
+
+# 3. Build the Master Leaflet Map
+leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  
+  # --- MAP PANES (Forces layer ordering so markers are always on top) ---
+  addMapPane("cd_polygons", zIndex = 400) %>%
+  addMapPane("intersections", zIndex = 410) %>%
+  
+  # --- LAYER 1: Raw Reduction (CDs) ---
+  addPolygons(
+    data = cd_normalized, group = "CD: Raw Reduction",
+    fillColor = ~pal_raw(raw_reduction),
+    weight = 1, opacity = 1, color = "white", dashArray = "3", fillOpacity = 0.7,
+    options = pathOptions(pane = "cd_polygons"),
+    popup = ~paste0("<b>Council District:</b> ", councildist, "<br><b>Raw Reduction:</b> ", raw_reduction, " casualties")
+  ) %>%
+  
+  # --- LAYER 2: % Reduction (CDs) ---
+  addPolygons(
+    data = cd_normalized, group = "CD: % Reduction",
+    fillColor = ~pal_pct(pct_reduction),
+    weight = 1, opacity = 1, color = "white", dashArray = "3", fillOpacity = 0.7,
+    options = pathOptions(pane = "cd_polygons"),
+    popup = ~paste0("<b>Council District:</b> ", councildist, "<br><b>% Reduction:</b> ", round(pct_reduction, 1), "%")
+  ) %>%
+  
+  # --- LAYER 3: Normalized Efficacy (CDs) ---
+  addPolygons(
+    data = cd_normalized, group = "CD: Normalized Efficacy",
+    fillColor = ~pal_norm(pct_drop_per_unit_intensity),
+    weight = 1, opacity = 1, color = "white", dashArray = "3", fillOpacity = 0.7,
+    options = pathOptions(pane = "cd_polygons"),
+    popup = ~paste0("<b>Council District:</b> ", councildist, "<br><b>Normalized Drop/Intensity:</b> ", round(pct_drop_per_unit_intensity, 1))
+  ) %>%
+  
+  # --- OVERLAY ---
+  addCircleMarkers(
+    data = top_intersections, group = "Top Intersections",
+    radius = 6, color = "black", weight = 1, # Added a black outline so they pop
+    fillColor = ~pal_markers(category), stroke = TRUE, fillOpacity = 1,
+    options = pathOptions(pane = "intersections"), # Assign to the top pane!
+    popup = ~paste0(
+      "<b>Intersection ID:</b> ", intersection_id, "<br>",
+      "<b>Category:</b> ", category, "<br>",
+      "<b>Location:</b> ", location_label, "<br><br>",
+      "<b>13/14 Cas:</b> ", start_cas, " | <b>22/23 Cas:</b> ", end_cas, "<br>",
+      "<b>Raw Drop:</b> ", raw_reduction, " | <b>% Drop:</b> ", round(pct_reduction, 1), "%<br><br>",
+      "<b>Interventions:</b><br>", interventions_str
+    )
+  ) %>%
+  
+  # --- LEGENDS  ---
+  addLegend(pal = pal_markers, values = top_intersections$category, opacity = 1, title = "Intersections", position = "bottomleft", className = "info legend leg-ints") %>%
+  addLegend(pal = pal_raw, values = cd_normalized$raw_reduction, opacity = 0.7, title = "Raw Drop", position = "bottomright", className = "info legend leg-raw") %>%
+  addLegend(pal = pal_pct, values = cd_normalized$pct_reduction, opacity = 0.7, title = "% Drop", position = "bottomright", className = "info legend leg-pct") %>%
+  addLegend(pal = pal_norm, values = cd_normalized$pct_drop_per_unit_intensity, opacity = 0.7, title = "Norm. Drop", position = "bottomright", className = "info legend leg-norm") %>%
+  
+  # --- LAYER CONTROLS ---
+  addLayersControl(
+    baseGroups = c("CD: Raw Reduction", "CD: % Reduction", "CD: Normalized Efficacy"),
+    overlayGroups = c("Top Intersections"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  
+  # --- JAVASCRIPT ---
+  htmlwidgets::onRender("
+    function(el, x) {
+      var map = this;
+      
+      function updateLegends(layerName) {
+        var raw = document.querySelector('.leg-raw');
+        var pct = document.querySelector('.leg-pct');
+        var norm = document.querySelector('.leg-norm');
+        
+        if (raw) raw.style.display = (layerName === 'CD: Raw Reduction') ? 'block' : 'none';
+        if (pct) pct.style.display = (layerName === 'CD: % Reduction') ? 'block' : 'none';
+        if (norm) norm.style.display = (layerName === 'CD: Normalized Efficacy') ? 'block' : 'none';
+      }
+      
+      // Run once on initial load
+      updateLegends('CD: Raw Reduction');
+      
+      // Run every time the radio button is changed
+      map.on('baselayerchange', function(e) {
+        updateLegends(e.name);
+      });
+    }
+  ")
+```
 
 
 
