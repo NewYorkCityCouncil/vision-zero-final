@@ -496,7 +496,63 @@ threshold = 0.01
 near_zero_variance_columns = variance[variance < threshold].index.tolist()
 near_zero_variance_columns 
 
-# In[ ]:
+# In[4]:
 
 
+# trend in collisions within intersections that did not receive interventions (controls)
+interventions = {
+    'Citywide Speed Limit Reduction': 'speed_limit_post',
+    'Enhanced Crossing': 'enhanced_crossing_post',
+    'Leading Pedestrian Interval': 'leading_pedestrian_interval_post',
+    'Neighborhood Slow Zone': 'slow_zones_post',
+    'SIP Corridors': 'street_improvement_corridors_post',
+    'SIP Intersection': 'street_improvement_project_post',
+    'Speed Hump': 'speed_humps_post',
+    'Turn Traffic Calming': 'turn_traffic_calming_post',
+    '25 MPH Signal Retiming': 'signal_retiming_post'
+}
 
+fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+axes = axes.flatten() 
+
+for i, (title, col_name) in enumerate(interventions.items()):
+    ax = axes[i]
+    
+    treated_ids = intersection_intervention_ever_treated[
+        intersection_intervention_ever_treated[col_name] == 1
+    ]['intersection_id'].unique()
+    
+    control_df = intersection_intervention_ever_treated[
+        ~intersection_intervention_ever_treated['intersection_id'].isin(treated_ids)
+    ]
+    control_ids_count = control_df['intersection_id'].nunique()
+    
+    trend_df = control_df.groupby('year')['pedestrian_death_or_injury'].sum().reset_index()
+    
+    lines_df = intersection_intervention_ever_treated.groupby('year')[col_name].sum().reset_index()
+    lines_df.rename(columns={col_name: 'intervention_count'}, inplace=True)
+    
+    ax.plot(trend_df['year'], trend_df['pedestrian_death_or_injury'], label='Control Trend', color='#1f77b4', linewidth=2)
+    
+    for idx, row in lines_df.iterrows():
+        if row['intervention_count'] > 0:
+            ax.axvline(
+                x=row['year'],
+                linewidth=row['intervention_count'] / 10,  # scale thickness
+                color='red',
+                alpha=0.25,
+                label='Intervention Rollout' if idx == 0 else "" 
+            )
+            
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Casualties')
+    ax.set_title(f'{title}\n(Control N={control_ids_count})')
+    ax.grid(alpha=0.3)
+    
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+
+plt.suptitle('Pedestrian Casualties at Control Intersections (Never Received Specific Treatment)', fontsize=18, y=1.02)
+plt.tight_layout()
+plt.show()
