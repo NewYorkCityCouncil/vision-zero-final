@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[240]:
+# In[1]:
 
 
 import pandas as pd
@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import Point
 
-# In[241]:
+# In[2]:
 
 
 # uploading DOT's table that connects IDs between various datasets (DOT, OTI, Open Data, LION)
@@ -28,7 +28,7 @@ dot_veh_collisions_key = dot_collisions_key[dot_collisions_key['nonmv'] == False
 dot_veh_collisions_key = dot_veh_collisions_key.drop(columns=['nonmv']) # dropping, no longer needed
 dot_veh_collisions_key = dot_veh_collisions_key.reset_index().drop(columns=['index'])
 
-# In[242]:
+# In[3]:
 
 
 # visualizing missing masterid values over time 
@@ -39,7 +39,7 @@ dot_veh_collisions_key = dot_veh_collisions_key.reset_index().drop(columns=['ind
 dot_veh_collisions_key['crash_date'] = pd.to_datetime(dot_veh_collisions_key['crash_date'])
 (100*dot_veh_collisions_key[dot_veh_collisions_key['masterid'].isnull()].groupby(dot_veh_collisions_key['crash_date'].dt.year).count()[['crashid']] / dot_veh_collisions_key.groupby(dot_veh_collisions_key['crash_date'].dt.year).count()[['crashid']]).plot()
 
-# In[243]:
+# In[4]:
 
 
 # adding lat/ lon to dot_veh_collisions_key based on masterid (using DOT provided key)
@@ -53,7 +53,7 @@ masterids_gdf = gpd.GeoDataFrame(masterids, geometry='master_geom')
 masterids_gdf.crs = "2263" 
 dot_veh_collisions_key = dot_veh_collisions_key.merge(masterids_gdf[['masterid', 'master_geom']], on='masterid', how='left')
 
-# In[244]:
+# In[5]:
 
 
 # Open Data crashes dataset
@@ -69,7 +69,7 @@ open_data_veh_collisions = pd.read_csv('../data/output/open-data_vehicle-collisi
 open_data_veh_collisions['crash_date'] = pd.to_datetime(open_data_veh_collisions['crash_date'])
 open_data_veh_collisions['quarter'] = pd.PeriodIndex(open_data_veh_collisions.crash_date, freq='Q').astype(str)
 
-# In[245]:
+# In[6]:
 
 
 # visualizing missing values over time (missing geocoding)
@@ -77,7 +77,7 @@ open_data_veh_collisions['quarter'] = pd.PeriodIndex(open_data_veh_collisions.cr
 v = open_data_veh_collisions[(open_data_veh_collisions['latitude'].isnull()) & (open_data_veh_collisions['crash_date'].dt.year.isin(list(range(2013,2025))))] 
 (100*v[v['latitude'].isnull()].groupby(v['crash_date'].dt.year).count()[['collision_id']] / open_data_veh_collisions.groupby(open_data_veh_collisions['crash_date'].dt.year).count()[['collision_id']]).plot()
 
-# In[246]:
+# In[7]:
 
 
 # merging Open Data collisions dataset with columns provided by DOT that link crashes to other datasets
@@ -90,7 +90,7 @@ merged_with_dot_key = merged_with_dot_key.drop(columns=['crash_date_y']).rename(
 # dropping any null masterids (rows that never received matches or highways, which are excluded)
 merged_with_dot_key = merged_with_dot_key[merged_with_dot_key['master_geom'].notnull()]
 
-# In[247]:
+# In[8]:
 
 
 # creating a "total" column because cyclist and motorist collisions have not been consistently reported over the years
@@ -101,7 +101,7 @@ merged_with_dot_key['total_deaths'] = merged_with_dot_key['number_of_pedestrians
 merged_with_dot_key['pedestrian_death_or_injury'] = merged_with_dot_key['number_of_pedestrians_killed'] + merged_with_dot_key['number_of_pedestrians_injured']
 merged_with_dot_key = merged_with_dot_key.drop(columns=['number_of_cyclist_injured','number_of_cyclist_killed','number_of_motorist_injured','number_of_motorist_killed','number_of_pedestrians_killed','number_of_pedestrians_injured'])
 
-# In[248]:
+# In[9]:
 
 
 # pre-2020 all collisions were recorded, post-2020 only those with death/ injury were reported
@@ -109,7 +109,7 @@ merged_with_dot_key = merged_with_dot_key.drop(columns=['number_of_cyclist_injur
 
 open_data_veh_collisions_death_injury = merged_with_dot_key[(merged_with_dot_key['total_injuries'] > 0) | (merged_with_dot_key['total_deaths'] > 0)]
 
-# In[249]:
+# In[10]:
 
 
 # uploading nodes dataset (cleaned for vision zero in 02_clean_node_dataset.ipynb)
@@ -118,7 +118,7 @@ nodes_vz = pd.read_csv('../data/output/vz_nodes.csv')
 nodes_vz['intersection_geom'] = nodes_vz['intersection_geom'].apply(wkt.loads)
 nodes_vz = gpd.GeoDataFrame(nodes_vz, geometry='intersection_geom', crs="EPSG:2263")
 
-# In[250]:
+# In[11]:
 
 
 # sjoining collision dataset with nodes dataset (using master_geom and intersection_geom)
@@ -133,7 +133,7 @@ merged_w_intersections['master_geom'] = merged_w_intersections['masterid'].map(d
 # removing some unneeded columns
 merged_w_intersections = merged_w_intersections.drop(columns=['crashid','crash_time','latitude','longitude','node_geom','NODEID','nodeid','row_wid'])
 
-# In[258]:
+# In[12]:
 
 
 # visualizing general trends (total collisions with death/ injury vs just pedestrian incidents)
@@ -143,7 +143,7 @@ quarterly_outcomes = merged_w_intersections.drop_duplicates(subset=['collision_i
 quarterly_outcomes['total_death_or_injury'].plot()
 quarterly_outcomes['pedestrian_death_or_injury'].plot()
 
-# In[257]:
+# In[13]:
 
 
 # comparing to unaltered Open Data collisions dataset, just to ensure that all the cleaning didn't artificially affect trends
@@ -157,7 +157,7 @@ quarterly_outcomes = open_data_veh_collisions.drop(columns=['crash_date', 'crash
 quarterly_outcomes['total_death_or_injury'].plot()
 quarterly_outcomes['pedestrian_death_or_injury'].plot()
 
-# In[253]:
+# In[14]:
 
 
 # locating collision_ids associated with varying numbers of streets
@@ -166,7 +166,7 @@ num = 48
 streets_per_crash = pd.DataFrame(merged_w_intersections['collision_id'].value_counts())
 streets_per_crash[streets_per_crash['count'] == num]
 
-# In[254]:
+# In[15]:
 
 
 # visualizing those matched to many streets to search for any issues 
@@ -181,7 +181,7 @@ df = gpd.GeoDataFrame(merged_w_intersections, geometry='master_geom', crs="EPSG:
 df[df['collision_id']==id].drop_duplicates().explore(m=n, color='blue')
 
 
-# In[255]:
+# In[16]:
 
 
 # visualizing 2017Q1 crashes
@@ -203,3 +203,45 @@ gdf_nodes[gdf_nodes['quarter'] == '2017Q1'].drop_duplicates(subset=['intersectio
 # download
 
 merged_w_intersections.to_csv('../data/output/collisions-merged-with-intersections.csv', index=False)
+
+# In[ ]:
+
+
+# let's check how many collisions are at intersections vs mid-block
+
+post_2016_crashes = open_data_veh_collisions[
+    (open_data_veh_collisions['crash_date'].dt.year >= 2016) & 
+    (open_data_veh_collisions['crash_date'].dt.year <= 2023) &
+    (open_data_veh_collisions['pedestrian_death_or_injury'] > 0) &
+    (open_data_veh_collisions['latitude'].notnull()) &
+    (open_data_veh_collisions['longitude'].notnull())
+].copy()
+
+post_2016_crashes['raw_geom'] = [Point(xy) for xy in zip(post_2016_crashes['longitude'], post_2016_crashes['latitude'])]
+gdf_raw_crashes = gpd.GeoDataFrame(post_2016_crashes, geometry='raw_geom', crs="EPSG:4326")
+gdf_raw_crashes = gdf_raw_crashes.to_crs("EPSG:2263")
+
+crashes_w_dist = gpd.sjoin_nearest(gdf_raw_crashes, nodes_vz, how='left', distance_col='dist_to_intersection')
+crashes_w_dist = crashes_w_dist.drop_duplicates(subset=['collision_id'])
+
+def categorize_distance(dist):
+    if dist <= 50:
+        return '0 to 50 feet (At/Near Intersection)'
+    elif dist <= 100:
+        return '50 to 100 feet (Close to Intersection)'
+    else:
+        return 'Greater than 100 feet (True Mid-block)'
+
+crashes_w_dist['location_category'] = crashes_w_dist['dist_to_intersection'].apply(categorize_distance)
+
+summary_table = crashes_w_dist['location_category'].value_counts().reset_index()
+summary_table.columns = ['Location Relative to Nearest Intersection', 'Total Pedestrian Crashes (2016-2023)']
+summary_table['Proportion (%)'] = (summary_table['Total Pedestrian Crashes (2016-2023)'] / len(crashes_w_dist) * 100).round(1)
+
+category_order = ['0 to 50 feet (At/Near Intersection)', '50 to 100 feet (Close to Intersection)', 'Greater than 100 feet (True Mid-block)']
+summary_table['Location Relative to Nearest Intersection'] = pd.Categorical(summary_table['Location Relative to Nearest Intersection'], categories=category_order, ordered=True)
+summary_table = summary_table.sort_values('Location Relative to Nearest Intersection')
+
+print("--- POST-2016 PEDESTRIAN CASUALTY LOCATIONS ---")
+print(f"Total analyzed crashes: {len(crashes_w_dist):,}\n")
+print(summary_table.to_string(index=False))
