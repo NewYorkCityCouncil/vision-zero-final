@@ -15,7 +15,7 @@ from itertools import product
 
 # intersection dataset
 
-nyc_intersections_vz = pd.read_csv('../data/output/collisions-merged-with-intersections.csv')
+nyc_intersections_vz = pd.read_csv('../data/output/collisions-merged-with-intersections-SENSITIVITY.csv')
 nyc_intersections_vz['intersection_geom'] = nyc_intersections_vz['intersection_geom'].apply(wkt.loads)
 nyc_intersections_vz['street_geom'] = nyc_intersections_vz['street_geom'].apply(wkt.loads)
 # nyc_intersections_vz['node_geom'] = nyc_intersections_vz['master_geom'].apply(wkt.loads)
@@ -44,12 +44,12 @@ intersection_intervention_table = intersection_intervention_table.assign(interse
 intersection_intervention_table = intersection_intervention_table.assign(intersection_id=intersection_intervention_table['intersection_year'].str.get(0),
                                                                          year=intersection_intervention_table['intersection_year'].str.get(1))
 
-# In[23]:
+# In[4]:
 
 
 intersection_intervention_table 
 
-# In[24]:
+# In[5]:
 
 
 # creating intersection_year column in dataset to make merging with intersection_intervention_table possible below
@@ -60,7 +60,7 @@ collisions['year'] = collisions['crash_date'].dt.year
 # merging two columns
 collisions['intersection_year'] = list(zip(collisions['intersection_id'], collisions['year']))
 
-# In[25]:
+# In[6]:
 
 
 # adding outcome columns to vz tables
@@ -75,12 +75,12 @@ intersection_intervention_table = intersection_intervention_table.merge(vehicle_
 intersection_intervention_table['pedestrian_death_or_injury'] = intersection_intervention_table['pedestrian_death_or_injury'].fillna(0) 
 intersection_intervention_table['total_death_or_injury'] = intersection_intervention_table['total_death_or_injury'].fillna(0)
 
-# In[26]:
+# In[7]:
 
 
 # downloading
 
-intersection_intervention_table.drop(columns=['intersection_year']).to_csv('../data/output/intersection_intervention_table_initial.csv', index=False)
+intersection_intervention_table.drop(columns=['intersection_year']).to_csv('../data/output/intersection_intervention_table_initial_SENSITIVITY.csv', index=False)
 
 # In[ ]:
 

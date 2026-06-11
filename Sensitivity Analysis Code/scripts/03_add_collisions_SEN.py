@@ -197,12 +197,12 @@ gdf_nodes[gdf_nodes['quarter'] == '2017Q1'].drop_duplicates(subset=['intersectio
     .drop(columns=['crash_date','intersection_geom','street_geom']) \
     .explore(m=m, color='blue')
 
-# In[256]:
+# In[ ]:
 
 
 # download
 
-merged_w_intersections.to_csv('../data/output/collisions-merged-with-intersections.csv', index=False)
+# merged_w_intersections.to_csv('../data/output/collisions-merged-with-intersections.csv', index=False)
 
 # In[ ]:
 
@@ -245,3 +245,33 @@ summary_table = summary_table.sort_values('Location Relative to Nearest Intersec
 print("--- POST-2016 PEDESTRIAN CASUALTY LOCATIONS ---")
 print(f"Total analyzed crashes: {len(crashes_w_dist):,}\n")
 print(summary_table.to_string(index=False))
+
+# In[20]:
+
+
+# this is where the pipeline splits for the sensitivity analysis 
+# we are only includig collisions which occured within 50 feet of an intersection 
+
+sens_df = merged_w_intersections.copy()
+
+gps_data = open_data_veh_collisions[['collision_id', 'latitude', 'longitude']].dropna(subset=['latitude', 'longitude']).drop_duplicates()
+sens_df = sens_df.merge(gps_data, on='collision_id', how='inner')
+
+sens_df['crash_point'] = gpd.points_from_xy(sens_df['longitude'], sens_df['latitude'])
+sens_df = gpd.GeoDataFrame(sens_df, geometry='crash_point', crs="EPSG:4326").to_crs("EPSG:2263")
+
+
+intersection_geoseries = gpd.GeoSeries(sens_df['intersection_geom'], crs="EPSG:2263")
+sens_df['dist_to_intersection'] = sens_df['crash_point'].distance(intersection_geoseries)
+
+# Filter to only keep collisions within 50 feet
+sens_df_final = sens_df[sens_df['dist_to_intersection'] <= 50].copy()
+
+cols_to_keep = merged_w_intersections.columns
+sens_df_final = sens_df_final[cols_to_keep]
+
+# 6. Export as SENSITIVITY CSV
+sens_df_final.to_csv('../data/output/collisions-merged-with-intersections-SENSITIVITY.csv', index=False)
+
+print(f"Original rows: {len(merged_w_intersections):,}")
+print(f"Sensitivity rows (<= 50ft): {len(sens_df_final):,}")
