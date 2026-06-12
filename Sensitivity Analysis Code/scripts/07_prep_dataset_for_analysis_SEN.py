@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 import pandas as pd
@@ -14,7 +14,7 @@ import numpy as np
 
 # upload
 
-intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_final.csv')
+intersection_intervention_table = pd.read_csv('../data/output/intersection_intervention_table_final_SENSITIVITY.csv')
 
 
 # #### Preparing Data For Analysis
@@ -100,20 +100,20 @@ obs_count_table.to_csv('../data/output/observations-by-intervention-type_2014-20
 
 obs_count_table
 
-# In[8]:
+# In[ ]:
 
 
-# using wider range of dates
+# using NARROWER range of dates
 
-# narrow down to set of intersections that only received any intervention between 2015-2022 (7 year period)
+# narrow down to set of intersections that only received any intervention between 2018-2021 (4 year period)
 
 # removing any intersections that received an intervention outside the window
-outside_intersection_analysis_window = intervention_start_dates[(intervention_start_dates['year'] < 2015) | (intervention_start_dates['year'] > 2021)]
+outside_intersection_analysis_window = intervention_start_dates[(intervention_start_dates['year'] < 2018) | (intervention_start_dates['year'] > 2021)]
 intersection_ids_to_remove = outside_intersection_analysis_window['intersection_id'].unique() 
 intersections_inside_treatment_window = intersection_intervention_table_ever_treated[~intersection_intervention_table_ever_treated['intersection_id'].isin(intersection_ids_to_remove)]
 
 # limiting to two years before and year after treatment window
-intersection_pre_post_dataset_more_years = intersections_inside_treatment_window[(intersections_inside_treatment_window['year'] >= 2013) & (intersections_inside_treatment_window['year'] <= 2023)]
+intersection_pre_post_dataset_more_years = intersections_inside_treatment_window[(intersections_inside_treatment_window['year'] >= 2016) & (intersections_inside_treatment_window['year'] <= 2023)]
 
 # In[113]:
 
@@ -130,11 +130,11 @@ intersection_pre_post_dataset_more_years = intersections_inside_treatment_window
 
 # intersection_pre_post_dataset_more_years.drop(columns=['intersection_geom']).to_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022_geocoded.csv', index=False)
 
-# In[130]:
+# In[6]:
 
 
 # download
-intersection_pre_post_dataset_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022.csv', index=False)
+intersection_pre_post_dataset_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2018-2021_SENSITIVITY.csv', index=False)
 
 # In[9]:
 
