@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 import pandas as pd
@@ -19,7 +19,7 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 
 # #### Preparing Data For Analysis
 
-# In[3]:
+# In[5]:
 
 
 # creating version that only includes ever-treated intersections
@@ -30,7 +30,7 @@ treated_intersection_ids = intersection_intervention_table.loc[(intersection_int
 intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
 
 
-# In[4]:
+# In[6]:
 
 
 # find when each intervention was first introduced to each intersection
@@ -151,6 +151,27 @@ obs_count_table.index.names = ['intervention']
 obs_count_table.to_csv('../data/output/observations-by-intervention-type_2015-2022.csv')
 
 obs_count_table
+
+# In[7]:
+
+
+# using NARROWER range of dates
+
+# narrow down to set of intersections that only received any intervention between 2018-2021 (4 year period)
+
+# removing any intersections that received an intervention outside the window
+outside_intersection_analysis_window = intervention_start_dates[(intervention_start_dates['year'] < 2018) | (intervention_start_dates['year'] > 2021)]
+intersection_ids_to_remove = outside_intersection_analysis_window['intersection_id'].unique() 
+intersections_inside_treatment_window = intersection_intervention_table_ever_treated[~intersection_intervention_table_ever_treated['intersection_id'].isin(intersection_ids_to_remove)]
+
+# limiting to two years before and year after treatment window
+intersection_pre_post_dataset_more_years = intersections_inside_treatment_window[(intersections_inside_treatment_window['year'] >= 2016) & (intersections_inside_treatment_window['year'] <= 2023)]
+
+# In[8]:
+
+
+# download
+intersection_pre_post_dataset_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2018-2021.csv', index=False)
 
 # In[20]:
 
