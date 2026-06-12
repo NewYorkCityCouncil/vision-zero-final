@@ -103,7 +103,7 @@ model_fixed <- fepois(
     street_improvement_project_post +
     street_improvement_corridors_post +
     signal_retiming_post +
-    #slow_zones_post +
+    slow_zones_post +
     speed_limit_post +
     covid_2020 + 
     scaled_summonses + 
