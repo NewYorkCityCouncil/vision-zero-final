@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[17]:
 
 
 import pandas as pd
@@ -10,30 +10,29 @@ from shapely import wkt
 from geopandas import GeoDataFrame
 from itertools import product
 
-# In[2]:
+# In[22]:
 
 
-# intersection dataset
+# original data for table shell
+nyc_intersections_original = pd.read_csv('../data/output/collisions-merged-with-intersections.csv')
+nyc_intersections = nyc_intersections_original['intersection_id'].unique()
 
-nyc_intersections_vz = pd.read_csv('../data/output/collisions-merged-with-intersections-SENSITIVITY.csv')
-nyc_intersections_vz['intersection_geom'] = nyc_intersections_vz['intersection_geom'].apply(wkt.loads)
-nyc_intersections_vz['street_geom'] = nyc_intersections_vz['street_geom'].apply(wkt.loads)
-# nyc_intersections_vz['node_geom'] = nyc_intersections_vz['master_geom'].apply(wkt.loads)
-nyc_intersections_vz = gpd.GeoDataFrame(nyc_intersections_vz, geometry='intersection_geom', crs='epsg:2263')
-
-# In[3]:
-
-
-# creating blank table with a row for each intersection at each year interval 
-
-# create datetime range (span of time that crash data is available)
-nyc_intersections_vz['crash_date'] = pd.to_datetime(nyc_intersections_vz['crash_date'], errors='coerce')
-start_date = nyc_intersections_vz[nyc_intersections_vz['crash_date'].notnull()]['crash_date'].dt.year.min() 
-end_date = nyc_intersections_vz[nyc_intersections_vz['crash_date'].notnull()]['crash_date'].dt.year.max()
+nyc_intersections_original['crash_date'] = pd.to_datetime(nyc_intersections_original['crash_date'], errors='coerce')
+start_date = nyc_intersections_original[nyc_intersections_original['crash_date'].notnull()]['crash_date'].dt.year.min() 
+end_date = nyc_intersections_original[nyc_intersections_original['crash_date'].notnull()]['crash_date'].dt.year.max()
 vz_dates = list(range(start_date, end_date+1))
 
-# all nyc intersections
-nyc_intersections = nyc_intersections_vz['intersection_id'].unique()
+# sensitivity data for actual collisions 
+nyc_intersections_vz = pd.read_csv('../data/output/collisions-merged-with-intersections-SENSITIVITY.csv')
+
+nyc_intersections_vz['crash_date'] = pd.to_datetime(nyc_intersections_vz['crash_date'], errors='coerce')
+nyc_intersections_vz['intersection_geom'] = nyc_intersections_vz['intersection_geom'].apply(wkt.loads)
+nyc_intersections_vz['street_geom'] = nyc_intersections_vz['street_geom'].apply(wkt.loads)
+nyc_intersections_vz = gpd.GeoDataFrame(nyc_intersections_vz, geometry='intersection_geom', crs='epsg:2263')
+
+
+# In[23]:
+
 
 # create product of street names and dates using itertools.product
 product_ = list(product(nyc_intersections, vz_dates))
@@ -44,12 +43,12 @@ intersection_intervention_table = intersection_intervention_table.assign(interse
 intersection_intervention_table = intersection_intervention_table.assign(intersection_id=intersection_intervention_table['intersection_year'].str.get(0),
                                                                          year=intersection_intervention_table['intersection_year'].str.get(1))
 
-# In[4]:
+# In[24]:
 
 
 intersection_intervention_table 
 
-# In[5]:
+# In[25]:
 
 
 # creating intersection_year column in dataset to make merging with intersection_intervention_table possible below
@@ -60,7 +59,7 @@ collisions['year'] = collisions['crash_date'].dt.year
 # merging two columns
 collisions['intersection_year'] = list(zip(collisions['intersection_id'], collisions['year']))
 
-# In[6]:
+# In[26]:
 
 
 # adding outcome columns to vz tables
@@ -75,7 +74,7 @@ intersection_intervention_table = intersection_intervention_table.merge(vehicle_
 intersection_intervention_table['pedestrian_death_or_injury'] = intersection_intervention_table['pedestrian_death_or_injury'].fillna(0) 
 intersection_intervention_table['total_death_or_injury'] = intersection_intervention_table['total_death_or_injury'].fillna(0)
 
-# In[7]:
+# In[27]:
 
 
 # downloading
