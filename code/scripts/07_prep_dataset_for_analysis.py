@@ -173,6 +173,50 @@ intersection_pre_post_dataset_more_years = intersections_inside_treatment_window
 # download
 intersection_pre_post_dataset_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2018-2021.csv', index=False)
 
+# In[3]:
+
+
+# leaving out SPEED HUMPS entirely and using 2015-2021 range
+
+# creating version that only includes ever-treated intersections (minus speed humps)
+# excluding intersections that only ever received citywide speed limit reduction
+intersection_interventions = ['leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'slow_zones_post', 'signal_retiming_post', 'street_improvement_project_post', 'street_improvement_corridors_post', 'enhanced_crossing_post']
+
+treated_intersection_ids = intersection_intervention_table.loc[(intersection_intervention_table[intersection_interventions] == 1).any(axis=1), 'intersection_id'].unique()
+intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
+
+# find when each intervention was first introduced to each intersection
+
+# melt the dataframe to create a long format for interventions
+df_long = intersection_intervention_table.melt(
+    id_vars=["year", "intersection_id"], 
+    value_vars=intersection_interventions,
+    var_name="intervention", 
+    value_name="turned_on"
+)
+
+# filter only rows where interventions turned on
+df_filtered = df_long[df_long["turned_on"] == 1]
+
+# identify the year each intervention was first turned on for each intersection
+intervention_start_dates = df_filtered.groupby(["intersection_id", "intervention"])["year"].min().reset_index()
+
+# narrow down to set of intersections that only received any intervention between 2015-2022 (7 year period)
+
+# removing any intersections that received an intervention outside the window
+outside_intersection_analysis_window = intervention_start_dates[(intervention_start_dates['year'] < 2015) | (intervention_start_dates['year'] > 2021)]
+intersection_ids_to_remove = outside_intersection_analysis_window['intersection_id'].unique() 
+intersections_inside_treatment_window = intersection_intervention_table_ever_treated[~intersection_intervention_table_ever_treated['intersection_id'].isin(intersection_ids_to_remove)]
+
+# limiting to two years before and year after treatment window
+intersection_pre_post_dataset_more_years = intersections_inside_treatment_window[(intersections_inside_treatment_window['year'] >= 2013) & (intersections_inside_treatment_window['year'] <= 2023)]
+
+# In[4]:
+
+
+# download
+intersection_pre_post_dataset_more_years.to_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022_NO_SPEED_HUMPS.csv', index=False)
+
 # In[20]:
 
 
