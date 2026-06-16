@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[13]:
 
 
 import pandas as pd
@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely import wkt
 import numpy as np 
 
-# In[8]:
+# In[14]:
 
 
 # upload
@@ -19,18 +19,18 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 
 # #### Preparing Data For Analysis
 
-# In[9]:
+# In[15]:
 
 
 # creating version that only includes ever-treated intersections
 # excluding intersections that only ever received citywide speed limit reduction
-intersection_interventions = ['leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'slow_zones_post', 'signal_retiming_post', 'speed_humps_post', 'street_improvement_project_post', 'street_improvement_corridors_post', 'enhanced_crossing_post']
+intersection_interventions = ['leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'signal_retiming_post', 'speed_humps_post', 'street_improvement_project_post', 'street_improvement_corridors_post', 'enhanced_crossing_post']
 
 treated_intersection_ids = intersection_intervention_table.loc[(intersection_intervention_table[intersection_interventions] == 1).any(axis=1), 'intersection_id'].unique()
 intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
 
 
-# In[10]:
+# In[16]:
 
 
 # find when each intervention was first introduced to each intersection
@@ -100,7 +100,7 @@ obs_count_table.to_csv('../data/output/observations-by-intervention-type_2014-20
 
 obs_count_table
 
-# In[ ]:
+# In[17]:
 
 
 # using NARROWER range of dates
@@ -130,7 +130,7 @@ intersection_pre_post_dataset_more_years = intersections_inside_treatment_window
 
 # intersection_pre_post_dataset_more_years.drop(columns=['intersection_geom']).to_csv('../data/output/intersection_intervention_table_ever_treated_2015-2022_geocoded.csv', index=False)
 
-# In[6]:
+# In[18]:
 
 
 # download
