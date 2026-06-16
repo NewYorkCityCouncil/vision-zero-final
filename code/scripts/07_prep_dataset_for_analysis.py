@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[3]:
 
 
 import pandas as pd
@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely import wkt
 import numpy as np 
 
-# In[2]:
+# In[6]:
 
 
 # upload
@@ -158,6 +158,29 @@ obs_count_table
 # using NARROWER range of dates
 
 # narrow down to set of intersections that only received any intervention between 2018-2021 (4 year period)
+
+# creating version that only includes ever-treated intersections
+# excluding intersections that only ever received citywide speed limit reduction and also slow zones 
+intersection_interventions = ['leading_pedestrian_interval_post', 'turn_traffic_calming_post', 'signal_retiming_post', 'speed_humps_post', 'street_improvement_project_post', 'street_improvement_corridors_post', 'enhanced_crossing_post']
+
+treated_intersection_ids = intersection_intervention_table.loc[(intersection_intervention_table[intersection_interventions] == 1).any(axis=1), 'intersection_id'].unique()
+intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
+
+# find when each intervention was first introduced to each intersection
+
+# melt the dataframe to create a long format for interventions
+df_long = intersection_intervention_table.melt(
+    id_vars=["year", "intersection_id"], 
+    value_vars=intersection_interventions,
+    var_name="intervention", 
+    value_name="turned_on"
+)
+
+# filter only rows where interventions turned on
+df_filtered = df_long[df_long["turned_on"] == 1]
+
+# identify the year each intervention was first turned on for each intersection
+intervention_start_dates = df_filtered.groupby(["intersection_id", "intervention"])["year"].min().reset_index()
 
 # removing any intersections that received an intervention outside the window
 outside_intersection_analysis_window = intervention_start_dates[(intervention_start_dates['year'] < 2018) | (intervention_start_dates['year'] > 2021)]

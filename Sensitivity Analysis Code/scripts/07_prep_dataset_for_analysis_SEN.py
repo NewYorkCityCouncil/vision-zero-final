@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely import wkt
 import numpy as np 
 
-# In[14]:
+# In[19]:
 
 
 # upload
@@ -19,7 +19,7 @@ intersection_intervention_table = pd.read_csv('../data/output/intersection_inter
 
 # #### Preparing Data For Analysis
 
-# In[15]:
+# In[20]:
 
 
 # creating version that only includes ever-treated intersections
@@ -30,7 +30,7 @@ treated_intersection_ids = intersection_intervention_table.loc[(intersection_int
 intersection_intervention_table_ever_treated = intersection_intervention_table[intersection_intervention_table['intersection_id'].isin(treated_intersection_ids)]
 
 
-# In[16]:
+# In[21]:
 
 
 # find when each intervention was first introduced to each intersection
@@ -100,7 +100,7 @@ obs_count_table.to_csv('../data/output/observations-by-intervention-type_2014-20
 
 obs_count_table
 
-# In[17]:
+# In[22]:
 
 
 # using NARROWER range of dates
