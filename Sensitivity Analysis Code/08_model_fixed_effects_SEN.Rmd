@@ -29,7 +29,7 @@ library(fixest)
 
 ```{r}
 # uploading
-sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2018-2021_SENSITIVITY.csv', show_col_types = FALSE)
+sites_ever_treated <- read_csv('../data/output/intersection_intervention_table_ever_treated_2018-2021.csv', show_col_types = FALSE)
 # meant to handle large datasets
 sites_ever_treated <- as.data.table(sites_ever_treated)
 
@@ -269,7 +269,7 @@ p
 
 ```{r}
 # Robust Bootstrapping Function for fixest::fenegbin
-cluster_bootstrap_fixest <- function(model, data, cluster_var, R = 500, secs_per_iter = NULL) {
+cluster_bootstrap_fixest <- function(model, data, cluster_var, R = 1000, secs_per_iter = NULL) {
   
   if (!is.null(secs_per_iter)) {
     total_hours <- secs_per_iter * R / 3600
@@ -521,7 +521,7 @@ boot_results <- cluster_bootstrap_fixest(
     model = model_fixed,
     data = sites_ever_treated,
     cluster_var = "intersection_id",
-    R = 1000, 
+    R = 50, 
     secs_per_iter = secs_per_iter
 )
 ```
